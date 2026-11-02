@@ -35,12 +35,16 @@ export interface Session {
   role: Role;
   demo: boolean;
   viewerPasswordRequired: boolean;
+  /** Prøveudgave uden server: data gemmes kun i denne browser. */
+  standalone?: boolean;
 }
 
 export type PublicData = Pick<AppData, 'rooms' | 'blocks' | 'subjects' | 'groups'> & {
   teachers: Omit<AppData['teachers'][number], 'annualHours'>[];
   settings: Pick<AppData['settings'], 'daypartStarts'>;
 };
+
+export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
 
 export const api = {
   session: () => request<Session>('/api/session'),

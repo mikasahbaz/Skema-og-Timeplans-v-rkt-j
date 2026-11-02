@@ -1,7 +1,7 @@
 // Indstillinger: stamdata (lærere, fag, hold, sale), beregningssatser, dagdele og data/backup.
 // Hver ændring er én fortrydbar handling via onCommit.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, type RevisionInfo } from './api';
+import { api, STANDALONE, type RevisionInfo } from './api';
 import { prepMinutesPerHour } from '../../shared/calc';
 import { TEACHER_PALETTE } from '../../shared/colors';
 import type { AppData, Teacher } from '../../shared/schema';
@@ -581,9 +581,13 @@ function DataTab({ data, onImportFile, onLoadDemo, demoMode, onRestoreRevision, 
       <section>
         <h3>Eksport</h3>
         <p className="muted small">Henter alle appdata (skema, stamdata, farver, salenavne og indstillinger) som én JSON-fil.</p>
-        <a className="btn" href="/api/export" download>
-          <Icon name="download" size={14} /> Download backup
-        </a>
+        {STANDALONE ? (
+          <p className="small">Download af backup virker ikke i prøveversionen; det gør det i den rigtige app.</p>
+        ) : (
+          <a className="btn" href="/api/export" download>
+            <Icon name="download" size={14} /> Download backup
+          </a>
+        )}
       </section>
       <section>
         <h3>Import</h3>

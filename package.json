@@ -16,7 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:all": "npm run typecheck && npm test && npm run build && npm run test:e2e"
+    "test:all": "npm run typecheck && npm test && npm run build && npm run test:e2e",
+    "build:standalone": "VITE_STANDALONE=1 vite build && node scripts/build-standalone.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

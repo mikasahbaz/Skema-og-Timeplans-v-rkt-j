@@ -530,15 +530,30 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
           <button className="btn btn-icon" onClick={() => setSettingsTab('teachers')} title="Indstillinger" aria-label="Indstillinger">
             <Icon name="gear" />
           </button>
-          <a className="btn btn-icon hide-sm" href="/" target="_blank" rel="noreferrer" title="Åbn læsevisning" aria-label="Åbn læsevisning">
+          <a
+            className="btn btn-icon hide-sm"
+            href={session.standalone ? '#vis' : '/'}
+            target={session.standalone ? undefined : '_blank'}
+            rel="noreferrer"
+            title="Åbn læsevisning"
+            aria-label="Åbn læsevisning"
+          >
             <Icon name="eye" />
           </a>
-          <button className="btn btn-icon" onClick={onLogout} title="Log ud" aria-label="Log ud">
+          {!session.standalone && (
+            <button className="btn btn-icon" onClick={onLogout} title="Log ud" aria-label="Log ud">
             <Icon name="logout" />
           </button>
+          )}
         </div>
       </header>
 
+      {session.standalone && (
+        <div className="banner banner-filter" role="note">
+          <strong>Prøveversion.</strong> Alt virker, men ændringer gemmes kun i denne browser og deles ikke med andre. Du kan nulstille under
+          Indstillinger → Data og backup.
+        </div>
+      )}
       {status === 'conflict' && (
         <div className="banner banner-error" role="alert">
           <strong>Ikke gemt:</strong> {errorMessage} Dine seneste ændringer er bevaret her og i browseren.

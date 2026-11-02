@@ -89,7 +89,7 @@ export function Viewer({ session, onSession }: { session: Session; onSession: ()
         <span className={`save ${error ? 'save-err' : 'save-ok'}`} role="status" title={checkedAt ? `Kontrolleret kl. ${checkedAt.toLocaleTimeString('da-DK')}` : undefined}>
           <Icon name={error ? 'cloudOff' : 'check'} size={14} /> {error ? 'Offline' : `Senest ændret ${updated}`}
         </span>
-        <a className="btn btn-sm" href="/admin">
+        <a className="btn btn-sm" href={session.standalone ? '#' : '/admin'}>
           {session.role === 'admin' ? 'Redigér' : 'Log ind'}
         </a>
       </header>

@@ -40,6 +40,16 @@ ADMIN_PASSWORD='et-langt-kodeord' npm start
 
 Appen kører derefter på http://localhost:3000.
 
+### Prøveversion uden server
+
+```bash
+npm run build:standalone
+```
+
+Bygger `dist/standalone/ugeskema-proeve.html`: én fil, hvor serveren er erstattet af en udgave,
+der kører i browseren (samme validering og beregning). Data gemmes kun i den enkelte browser, og
+download af backup er slået fra. Bruges til at prøve appen uden hosting – ikke til rigtig drift.
+
 ### Demotilstand
 
 ```bash

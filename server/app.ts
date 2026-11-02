@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { demoAppData } from '../shared/demo.js';
+import { publicProjection } from '../shared/public.js';
 import type { AppData } from '../shared/schema.js';
 import { validateAppData } from '../shared/validate.js';
 import { LoginLimiter, safeEqual, Sessions, type Role } from './auth.js';
@@ -11,17 +12,7 @@ import { Store } from './db.js';
 
 export const BACKUP_FORMAT = 'ballet-ugeskema-backup';
 
-/** Læsevisningen får kun det, der skal til for at vise skemaet (ingen årstimer eller satser). */
-export function publicProjection(data: AppData) {
-  return {
-    rooms: data.rooms,
-    blocks: data.blocks,
-    subjects: data.subjects,
-    groups: data.groups,
-    teachers: data.teachers.map(({ id, initials, name, color, archived }) => ({ id, initials, name, color, archived })),
-    settings: { daypartStarts: data.settings.daypartStarts },
-  };
-}
+export { publicProjection };
 
 function hostOf(url: string): string | null {
   try {

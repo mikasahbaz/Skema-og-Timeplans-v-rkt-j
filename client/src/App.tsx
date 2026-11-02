@@ -10,6 +10,12 @@ import { Viewer } from './Viewer';
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const h = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', h);
+    return () => window.removeEventListener('hashchange', h);
+  }, []);
   const refresh = useCallback(() => {
     api.session().then(setSession, (e) => setError((e as Error).message));
   }, []);
@@ -17,7 +23,8 @@ export function App() {
 
   if (error) return <div className="loading">Kunne ikke kontakte serveren: {error}</div>;
   if (!session) return <div className="loading">Indlæser…</div>;
-  const isAdminRoute = window.location.pathname.startsWith('/admin');
+  // Prøveudgaven skifter mellem redigering og læsevisning med #vis.
+  const isAdminRoute = session.standalone ? hash !== '#vis' : window.location.pathname.startsWith('/admin');
   if (!isAdminRoute) return <Viewer session={session} onSession={refresh} />;
   if (session.role !== 'admin')
     return <LoginPage title="Administrator" subtitle="Log ind for at redigere ugeskemaet." onSuccess={refresh} />;

@@ -1,4 +1,4 @@
-import type { Counts } from './api';
+import { STANDALONE, type Counts } from './api';
 import { Icon, Modal } from './ui';
 
 export interface ImportState {
@@ -21,9 +21,11 @@ export function ImportDialog({ state, onCancel, onConfirm }: { state: ImportStat
             <button className="btn" onClick={onCancel} data-autofocus>
               Annuller
             </button>
-            <a className="btn" href="/api/export" download>
-              <Icon name="download" size={14} /> Gem nuværende først
-            </a>
+            {!STANDALONE && (
+              <a className="btn" href="/api/export" download>
+                <Icon name="download" size={14} /> Gem nuværende først
+              </a>
+            )}
             <button className="btn btn-warn" onClick={onConfirm}>
               Erstat alle data
             </button>

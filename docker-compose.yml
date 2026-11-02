@@ -1,0 +1,18 @@
+# Selvhostning med vedvarende database i en navngiven volumen.
+# Start: ADMIN_PASSWORD='et-langt-kodeord' docker compose up -d
+services:
+  ugeskema:
+    build: .
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Sæt ADMIN_PASSWORD}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
+      # Sæt til true, når appen ligger bag HTTPS-proxy (anbefalet). false kun ved ren http på et lokalnet.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    volumes:
+      - ugeskema-data:/data
+volumes:
+  ugeskema-data:

@@ -344,3 +344,36 @@ test('Alt + træk kopierer i stedet for at flytte', async ({ page, request }) =>
   await expect(block(page, 'A')).toBeVisible();
   await expect(page.locator('.toast')).toContainText('Kopi oprettet');
 });
+
+test('gendan tidligere version fra serverens historik (kan fortrydes)', async ({ page, request }) => {
+  await resetData(request, fixture([A]));
+  await loginAdmin(page);
+  await block(page, 'A').focus();
+  await page.keyboard.press('Delete');
+  await waitSaved(page);
+  await expect(page.locator('.block')).toHaveCount(0);
+  await page.getByLabel('Indstillinger').click();
+  await page.getByRole('tab', { name: 'Data og backup' }).click();
+  await expect(page.locator('.rev-table')).toContainText('Nuværende');
+  await page.locator('.rev-table').getByRole('button', { name: 'Gendan' }).first().click();
+  await page.getByRole('button', { name: 'Færdig' }).click();
+  await expect(block(page, 'A')).toBeVisible();
+  await waitSaved(page);
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('.block')).toHaveCount(0);
+});
+
+test('en besked nederst blokerer aldrig knapper i en åben dialog', async ({ page, request }) => {
+  const d = fixture([A]);
+  d.subjects[0].name = 'Et meget langt fagnavn der fylder godt op i redigeringen, så panelet bliver højt';
+  await resetData(request, d);
+  await page.setViewportSize({ width: 1440, height: 640 });
+  await loginAdmin(page);
+  for (let i = 0; i < 3; i++) {
+    await block(page, 'A').click();
+    const dialog = page.getByRole('dialog', { name: 'Rediger blok' });
+    await dialog.getByLabel('Note').fill(`note ${i}`);
+    await dialog.getByRole('button', { name: 'Gem' }).click({ timeout: 2000 });
+    await expect(dialog).toHaveCount(0);
+  }
+});

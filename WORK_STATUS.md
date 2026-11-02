@@ -1,43 +1,67 @@
 # WORK_STATUS
 
-Opdateret: 2. november 2026.
+Opdateret: 2. november 2026 (efter designgennemgang, stresstest og sikkerhedsgennemgang).
 
 ## Verificeret status
 
 Første version er færdig i forhold til SPEC.md og kører lokalt. Følgende er kørt og bestået:
 
-- `npm run typecheck` (klient + server) og `npm run build`.
-- `npm test`: 37 enheds- og API-tests. Det omfatter eksempel A–D, 08.10–09.50 = 100 min,
-  fredag→lørdag, tilføj/fjern anden lærer, manglende værdier ≠ 0, et indtastet 0 som gyldig værdi,
-  konflikter, validering, forslag til ledig tid, kopi/del blok, adgang, 409 ved forældet version,
-  serverens validering, persistens efter genstart, import/eksport og beskyttelse mod demodata.
-- `npm run test:e2e`: 17 Playwright-tests i Chromium mod den byggede app. Det omfatter
-  timeoverblik for eksempel A–D, oprettelse fra celle, genindlæsning, en anden browsersession,
-  afvisning af ugyldige data, træk med mus inden for samme dagdel og til en anden dagdel
-  (tidsvælger og annuller), touch-træk via CDP, Alt+træk-kopi, kopi via menu, konfliktdialog
-  (annuller / behold), tastatur-flyt, fortryd og annuller fortryd, simuleret lagringsfejl med
-  "Prøv igen", et forældet vindue, manglende satser, læseadgang uden skriveret og automatisk
-  opdatering af læsevisningen.
-- En ren `npm ci` → build → `npm prune --omit=dev` → start i en frisk kopi virker. Det er de
-  samme trin som i Dockerfilen.
-- Skærmbilleder i 1440×900, 1280×800 og iPhone 13 er gennemset (`docs/`).
+- `npm run typecheck` og `npm run build`.
+- `npm test`: 43 enheds- og API-tests. De dækker beregningseksempel A–D, konflikter, validering,
+  adgang, versionskontrol, persistens, import og demobeskyttelse. Desuden dækkes skift af
+  adgangskode (gamle logins bliver ugyldige), en forfalsket rolle i cookien, login-spærring,
+  versionshistorik, sikkerhedsheadere, danske fejlbeskeder og daglig backup.
+- `npm run test:e2e`: 19 Playwright-tests i Chromium. Ud over de oprindelige forløb dækkes
+  gendannelse af en tidligere version og at en besked aldrig blokerer en dialogknap.
+
+### Designgennemgang (1280–1920 px)
+
+Rettet:
+- Alle 8 sale er synlige uden vandret rulning ved 1366, 1440 og 1920 px med timepanelet til højre.
+- Timepanelet er bredere på store skærme, og dagstabellen klippes ikke længere.
+- "+"-knappen dækker ikke længere lærerinitialer.
+- Konfliktbeskederne vises på én linje.
+- Klokkeslæt klippes ikke af ⋯-knappen på bærbare.
+- En gammel "Fortryd"-besked erstattes af den nyeste, så den ikke kan fortryde en anden handling.
+- Beskeder ligger under dialoger, så de ikke blokerer knapper.
+- Fejlteksten ved serverfejl er tydeligere.
+
+### Stresstest
+
+Testdata: 568 blokke, 60 lærere, 30 fag og 20 hold.
+- Server: et stort skema gemmes på 42 ms. Af 100 samtidige gemninger lykkedes præcis én, og 99
+  blev afvist med 409. 300 gemninger i træk tog 2,2 s. 14 slags ugyldige eller ondsindede data
+  blev alle afvist uden at ændre databasen.
+- Browser: første visning tager 0,5 s, en gemning fra redigeringen ca. 150 ms, træk kører ved
+  ca. 60 billeder i sekundet, og 40 fortryd/gentag tager 0,8 s. Der var ingen konsolfejl.
+- Netværk: langsomt net med 15 hurtige ændringer gav samme data i klient og server. Efter et
+  netudfald gemte appen automatisk igen efter 2,3 s. Ændringer fra en fane, der blev lukket
+  midt i en fejlet gemning, blev tilbudt og gendannet ved næste besøg.
+- Script-injektion i navne og noter vises som tekst og køres ikke.
+
+### Sikkerhed og robusthed (tilføjet)
+
+- CSP og andre sikkerhedsheadere, samt HSTS bag HTTPS.
+- Login-cookies er bundet til adgangskoden: skiftes den, bliver gamle logins ugyldige.
+- Login-spærring efter 20 forkerte forsøg pr. IP på 10 minutter (tidligere 8, hvilket kunne
+  spærre en hel skole bag én IP-adresse ude). Hukommelsesforbruget er begrænset.
+- Daglig online-kopi af databasen (14 dage), integritetskontrol ved opstart og pæn nedlukning.
+- Gendannelse af en vilkårlig af de seneste 500 versioner fra appen.
 
 ## Ikke verificeret / begrænsninger
 
-- **Docker-image er ikke bygget her.** Containeren kunne ikke nå npm-registret gennem
-  sandkassens proxy. Dockerfilens trin er i stedet verificeret uden container (se ovenfor).
-- **Ikke sat online.** Det kræver et hostingvalg og en konto (se README → Online drift).
-- Kun testet i Chromium. Safari/iPad og Firefox er ikke afprøvet. Touch er testet med emulerede
-  touch-events, ikke på en fysisk tablet.
-- Fortryd-historikken gælder den aktuelle fane og nulstilles, når data hentes fra en anden
-  session eller importeres.
-- Stamdata (fag, hold, lærere) oprettes under Indstillinger. Der er ingen hurtig oprettelse direkte
-  i blokredigeringen.
+- Docker-imaget er ikke bygget her (sandkassens proxy blokerer npm i containeren). Trinene er
+  verificeret uden container.
+- Appen er ikke sat online; det kræver hostingvalg og en konto.
+- Kun testet i Chromium. Safari og Firefox er ikke afprøvet. Touch er kun testet med
+  emulerede touch-events.
+- De daglige backupkopier ligger på samme disk som databasen. En ekstern backup skal ordnes
+  ved drift.
 
 ## Næste konkrete skridt
 
-1. Vælg hosting med vedvarende disk, fx Render (`render.yaml`) eller en VPS med
-   `docker compose`. Sæt `ADMIN_PASSWORD` (og evt. `VIEWER_PASSWORD`) og slå HTTPS til.
-2. Byg Docker-imaget i et miljø med normal netadgang: `docker build -t ballet-ugeskema .`
-3. Afprøv på en rigtig iPad og i Safari, især langt tryk + træk og panelets størrelse.
+1. Gennemse og flet grenen `design-og-robusthed` ind i `main`.
+2. Vælg hosting med vedvarende disk (Render via `render.yaml` eller VPS med `docker compose`),
+   sæt `ADMIN_PASSWORD` og `TRUST_PROXY=true`, og slå HTTPS til.
+3. Afprøv i Safari/Firefox og på en rigtig iPad.
 4. Indtast skolens rigtige satser, undervisningsuger og årsarbejdstimer, og tag en første backup.

@@ -302,7 +302,14 @@ input[aria-invalid='true'] {
   border: 1px solid #f5c8aa;
   color: #7c2d0a;
 }
-.notice-conflict strong {
+.notice-inline {
+  display: block;
+}
+.notice-inline svg {
+  vertical-align: -2px;
+  color: var(--warn);
+}
+.notice-conflict > strong {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -626,8 +633,13 @@ input[aria-invalid='true'] {
   cursor: cell;
   transition: background 0.1s, box-shadow 0.1s;
 }
-.cell:hover .cell-add {
+.cell-empty:hover .cell-add,
+.cell-add:focus-visible {
   opacity: 1;
+}
+/* I celler med blokke vises "+" ikke, så den aldrig dækker initialer; klik på tom plads opretter stadig. */
+.cell:not(.cell-empty) .cell-add {
+  display: none;
 }
 .cell-add {
   position: absolute;
@@ -1152,7 +1164,8 @@ input[aria-invalid='true'] {
   left: 50%;
   bottom: 18px;
   transform: translateX(-50%);
-  z-index: 80;
+  /* Under dialoger (z-index 50), så en besked aldrig blokerer en knap i en åben dialog. */
+  z-index: 45;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1244,15 +1257,22 @@ input[aria-invalid='true'] {
 .hours-table,
 .day-table {
   width: 100%;
+  min-width: 0;
   border-collapse: collapse;
   font-size: 12.5px;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.day-table {
+  font-size: 12px;
 }
 .hours-table th,
 .hours-table td,
 .day-table th,
 .day-table td {
   text-align: right;
-  padding: 5px 6px;
+  padding: 5px 5px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -1653,6 +1673,11 @@ input[aria-invalid='true'] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
+.settings-table.rev-table td {
+  padding: 5px 6px;
+  font-size: 13px;
+  vertical-align: middle;
+}
 .data-tab section {
   padding: 12px 0;
   border-top: 1px solid var(--line);
@@ -1819,6 +1844,25 @@ input[aria-invalid='true'] {
 }
 
 /* ---- Responsivt ------------------------------------------------------------------------------- */
+/* Bærbare (1340–1500 px) med panel til højre: smallere kolonner, så alle 8 rum er synlige. */
+@media (max-width: 1500px) {
+  :root {
+    --col-min: 112px;
+  }
+  .block {
+    padding: 4px 5px 5px;
+  }
+  .block-top {
+    padding-right: 17px;
+  }
+  .block-time {
+    font-size: 11.5px;
+  }
+  .block-menu-btn {
+    width: 18px;
+    right: 2px;
+  }
+}
 @media (min-width: 1700px) {
   :root {
     --col-min: 150px;

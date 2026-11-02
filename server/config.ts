@@ -11,6 +11,9 @@ export interface Config {
   trustProxy: boolean;
   production: boolean;
   staticDir: string | null;
+  /** Mappe til daglige databasekopier; null = slået fra. */
+  backupDir: string | null;
+  backupKeep: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -45,5 +48,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1',
     production,
     staticDir: env.STATIC_DIR ? path.resolve(env.STATIC_DIR) : null,
+    backupDir: env.BACKUP_DIR === 'off' ? null : path.resolve(env.BACKUP_DIR ?? path.join(path.dirname(dbFile), 'backups')),
+    backupKeep: Math.max(1, Number(env.BACKUP_KEEP ?? 14) || 14),
   };
 }

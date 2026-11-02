@@ -70,7 +70,7 @@ export function HoursPanel(p: Props) {
         </div>
       )}
       {p.conflictCount > 0 && (
-        <div className="notice notice-conflict small">
+        <div className="notice notice-conflict notice-inline small">
           <Icon name="alert" size={14} /> Planen indeholder {p.conflictCount} {p.conflictCount === 1 ? 'konflikt' : 'konflikter'}. Konfliktblokke
           tæller med i opgørelsen.{' '}
           <button className="link" onClick={p.onShowConflicts}>
@@ -202,6 +202,7 @@ function TeacherDetail({ p, sum, fmt }: { p: Props; sum: TeacherSummary; fmt: (m
       </div>
       <div className="detail-tables">
       <h4>Pr. ugedag</h4>
+      <div className="table-scroll">
       <table className="day-table">
         <thead>
           <tr>
@@ -236,6 +237,7 @@ function TeacherDetail({ p, sum, fmt }: { p: Props; sum: TeacherSummary; fmt: (m
           </tr>
         </tfoot>
       </table>
+      </div>
 
       <div className="split-lists">
         <div>

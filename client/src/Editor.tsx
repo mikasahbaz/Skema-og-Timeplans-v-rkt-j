@@ -41,6 +41,9 @@ interface ConflictPrompt {
   after?: () => void;
 }
 
+/** Standardbredde for timepanelet: bredere på store skærme, så tabellerne har plads. */
+const defaultPanelSize = () => (window.innerWidth >= 1340 ? Math.round(Math.min(480, Math.max(340, window.innerWidth * 0.25))) : 330);
+
 const isTyping = (el: EventTarget | null) =>
   el instanceof HTMLElement &&
   ((el.tagName === 'INPUT' && !['radio', 'checkbox', 'button', 'color'].includes((el as HTMLInputElement).type)) ||
@@ -57,6 +60,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   const nextUndo = useEditor(store, (s) => s.past[s.past.length - 1]?.label);
   const nextRedo = useEditor(store, (s) => s.future[0]?.label);
   const lastSavedAt = useEditor(store, (s) => s.lastSavedAt);
+  const baseVersion = useEditor(store, (s) => s.baseVersion);
 
   const summaries = useMemo(() => computeAllSummaries(data), [data]);
   const conflicts = useMemo(() => allConflicts(data.blocks), [data.blocks]);
@@ -66,8 +70,8 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   const [filter, setFilter] = useState<Filter>(emptyFilter);
   const [selectedTeacher, setSelectedTeacher] = useState<string | null>(() => pref('selectedTeacher', null));
   const [unit, setUnit] = useState<Unit>(() => pref('unit', 'hm'));
-  const [panelPos, setPanelPos] = useState<'right' | 'bottom'>(() => pref('panelPos', window.innerWidth >= 1360 ? 'right' : 'bottom'));
-  const [panelSize, setPanelSize] = useState<number>(() => pref('panelSize', window.innerWidth >= 1360 ? 360 : 330));
+  const [panelPos, setPanelPos] = useState<'right' | 'bottom'>(() => pref('panelPos', window.innerWidth >= 1340 ? 'right' : 'bottom'));
+  const [panelSize, setPanelSize] = useState<number>(() => pref('panelSize', defaultPanelSize()));
   const [panelOpen, setPanelOpen] = useState<boolean>(() => pref('panelOpen', true));
   const [editor, setEditor] = useState<{ block: Block; isNew: boolean; anchor: DOMRect | null } | null>(null);
   const [menu, setMenu] = useState<{ block: Block; rect: DOMRect } | null>(null);
@@ -110,11 +114,11 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   // ---- Fortryd ---------------------------------------------------------------
   const undo = useCallback(() => {
     const label = store.undo();
-    if (label) push({ text: `Fortrudt: ${label}`, action: { label: 'Annuller fortryd', run: () => store.redo() } }, 4000);
+    if (label) push({ text: `Fortrudt: ${label}`, group: 'history', action: { label: 'Annuller fortryd', run: () => store.redo() } }, 4000);
   }, [store, push]);
   const redo = useCallback(() => {
     const label = store.redo();
-    if (label) push({ text: `Gentaget: ${label}` }, 3000);
+    if (label) push({ text: `Gentaget: ${label}`, group: 'history' }, 3000);
   }, [store, push]);
 
   /** Gennemfør en handling (ét historiktrin). Returnerer fejl, hvis valideringen afviser den. */
@@ -126,7 +130,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
         return r.errors;
       }
       if (opts.flashId) flash(opts.flashId);
-      if (!opts.quiet) push({ text: opts.message ?? label, kind: 'success', action: { label: 'Fortryd', run: undo } });
+      if (!opts.quiet) push({ text: opts.message ?? label, kind: 'success', group: 'history', action: { label: 'Fortryd', run: undo } });
       return null;
     },
     [store, push, flash, undo],
@@ -420,6 +424,15 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
       await reloadFromServer('Backup importeret. Alle data er erstattet, og fortryd-historikken er nulstillet.');
     } catch (e) {
       push({ text: `Import mislykkedes: ${(e as Error).message}`, kind: 'error' });
+    }
+  };
+  const restoreRevision = async (version: number) => {
+    try {
+      const rev = await api.revision(version);
+      const when = new Date(rev.createdAt).toLocaleString('da-DK', { dateStyle: 'medium', timeStyle: 'short' });
+      commit(`Gendan version ${version}`, rev.data, { message: `Version ${version} fra ${when} er gendannet` });
+    } catch (e) {
+      push({ text: `Kunne ikke gendanne: ${(e as Error).message}`, kind: 'error' });
     }
   };
   const loadDemo = async () => {
@@ -721,6 +734,8 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
           onLoadDemo={() => void loadDemo()}
           demoMode={session.demo}
           undo={{ onUndo: undo, onRedo: redo, undoLabel: nextUndo, redoLabel: nextRedo }}
+          currentVersion={baseVersion}
+          onRestoreRevision={(v) => void restoreRevision(v)}
         />
       )}
 

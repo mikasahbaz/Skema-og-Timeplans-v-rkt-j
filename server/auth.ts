@@ -17,18 +17,27 @@ export function safeEqual(a: string, b: string): boolean {
 }
 
 export class Sessions {
+  /**
+   * Signeringsnøglen afhænger af rollens adgangskode. Skiftes ADMIN_PASSWORD (eller
+   * VIEWER_PASSWORD), bliver alle eksisterende logins for den rolle automatisk ugyldige.
+   */
+  private keys: Record<Role, string>;
   constructor(
-    private secret: string,
+    secret: string,
+    passwords: { admin: string; viewer: string | null },
     private secure: boolean,
-  ) {}
+  ) {
+    const derive = (role: Role, pw: string) => crypto.createHash('sha256').update(`${secret}:${role}:${pw}`).digest('hex');
+    this.keys = { admin: derive('admin', passwords.admin), viewer: derive('viewer', passwords.viewer ?? '') };
+  }
 
-  private sign(payload: string) {
-    return crypto.createHmac('sha256', this.secret).update(payload).digest('base64url');
+  private sign(payload: string, role: Role) {
+    return crypto.createHmac('sha256', this.keys[role]).update(payload).digest('base64url');
   }
 
   issue(res: Response, role: Role) {
     const payload = b64(JSON.stringify({ r: role, exp: Date.now() + MAX_AGE_MS }));
-    res.cookie(COOKIE, `${payload}.${this.sign(payload)}`, {
+    res.cookie(COOKIE, `${payload}.${this.sign(payload, role)}`, {
       httpOnly: true,
       sameSite: 'strict',
       secure: this.secure,
@@ -45,11 +54,13 @@ export class Sessions {
     const raw = parseCookies(req.headers.cookie)[COOKIE];
     if (!raw) return null;
     const [payload, sig] = raw.split('.');
-    if (!payload || !sig || !safeEqual(sig, this.sign(payload))) return null;
+    if (!payload || !sig) return null;
     try {
       const { r, exp } = JSON.parse(unb64(payload)) as { r: Role; exp: number };
+      if (r !== 'admin' && r !== 'viewer') return null;
+      if (!safeEqual(sig, this.sign(payload, r))) return null;
       if (typeof exp !== 'number' || exp < Date.now()) return null;
-      return r === 'admin' || r === 'viewer' ? r : null;
+      return r;
     } catch {
       return null;
     }
@@ -67,17 +78,30 @@ function parseCookies(header: string | undefined): Record<string, string> {
   return out;
 }
 
-/** Simpel beskyttelse mod gætteangreb: max 8 fejl pr. IP pr. 10 minutter. */
+/**
+ * Beskyttelse mod gætteangreb: højst 20 forkerte forsøg pr. IP pr. 10 minutter.
+ * Grænsen er sat, så en skole bag én fælles IP-adresse ikke spærrer sig selv ude ved
+ * almindelige tastefejl. Kræver TRUST_PROXY=true bag en proxy, så den rigtige IP bruges.
+ */
 export class LoginLimiter {
+  static readonly MAX = 20;
+  static readonly WINDOW_MS = 10 * 60 * 1000;
   private failures = new Map<string, number[]>();
   blocked(ip: string): boolean {
     const now = Date.now();
-    const list = (this.failures.get(ip) ?? []).filter((t) => now - t < 10 * 60 * 1000);
-    this.failures.set(ip, list);
-    return list.length >= 8;
+    const list = (this.failures.get(ip) ?? []).filter((t) => now - t < LoginLimiter.WINDOW_MS);
+    if (list.length) this.failures.set(ip, list);
+    else this.failures.delete(ip);
+    return list.length >= LoginLimiter.MAX;
   }
   fail(ip: string) {
-    this.failures.set(ip, [...(this.failures.get(ip) ?? []), Date.now()]);
+    // Undgå ubegrænset hukommelsesforbrug ved mange forskellige IP-adresser.
+    if (this.failures.size > 10_000) {
+      const now = Date.now();
+      for (const [k, v] of this.failures) if (!v.some((t) => now - t < LoginLimiter.WINDOW_MS)) this.failures.delete(k);
+      if (this.failures.size > 10_000) this.failures.clear();
+    }
+    this.failures.set(ip, [...(this.failures.get(ip) ?? []), Date.now()].slice(-LoginLimiter.MAX));
   }
   reset(ip: string) {
     this.failures.delete(ip);

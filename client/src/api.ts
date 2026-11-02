@@ -24,7 +24,10 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(0, 'Ingen forbindelse til serveren');
   }
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new ApiError(res.status, String(body.error ?? `Fejl ${res.status}`), body);
+  if (!res.ok) {
+    const fallback = res.status >= 500 ? `Serveren svarede med en fejl (${res.status})` : `Uventet svar fra serveren (${res.status})`;
+    throw new ApiError(res.status, String(body.error ?? fallback), body);
+  }
   return body as T;
 }
 
@@ -58,9 +61,19 @@ export const api = {
     }>('/api/import/preview', { method: 'POST', body: JSON.stringify(backup) }),
   importReplace: (baseVersion: number, backup: unknown) =>
     request<{ version: number }>('/api/import', { method: 'POST', body: JSON.stringify({ baseVersion, backup }) }),
+  revisions: () => request<RevisionInfo[]>('/api/revisions'),
+  revision: (version: number) => request<{ version: number; createdAt: string; data: AppData }>(`/api/revisions/${version}`),
   loadDemo: (baseVersion: number) =>
     request<{ version: number }>('/api/demo', { method: 'POST', body: JSON.stringify({ baseVersion }) }),
 };
+
+export interface RevisionInfo {
+  version: number;
+  createdAt: string;
+  source: string;
+  blocks: number;
+  teachers: number;
+}
 
 export interface Counts {
   blocks: number;

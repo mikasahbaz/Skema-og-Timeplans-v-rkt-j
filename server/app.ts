@@ -50,16 +50,29 @@ function unwrapBackup(body: unknown): unknown {
 
 export function createApp(config: Config, store?: Store) {
   const db = store ?? new Store(config.dbFile, config.demoMode ? demoAppData : undefined);
-  const sessions = new Sessions(config.sessionSecret ?? db.sessionSecret(), config.cookieSecure);
+  const sessions = new Sessions(
+    config.sessionSecret ?? db.sessionSecret(),
+    { admin: config.adminPassword, viewer: config.viewerPassword },
+    config.cookieSecure,
+  );
   const limiter = new LoginLimiter();
   const app = express();
   if (config.trustProxy) app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    // Kun egne scripts; inline-styles bruges til lærerfarver.
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
+        "font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    );
+    if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     next();
   });
 
@@ -189,6 +202,13 @@ export function createApp(config: Config, store?: Store) {
 
   app.get('/api/revisions', requireAdmin, (_req, res) => {
     res.json(db.revisions());
+  });
+
+  app.get('/api/revisions/:version', requireAdmin, (req, res) => {
+    const version = Number(req.params.version);
+    const rev = Number.isInteger(version) ? db.revision(version) : null;
+    if (!rev) return res.status(404).json({ error: 'Versionen findes ikke (længere)' });
+    res.json(rev);
   });
 
   app.use('/api', (_req, res) => {

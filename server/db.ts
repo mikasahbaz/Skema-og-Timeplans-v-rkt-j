@@ -83,8 +83,46 @@ export class Store {
 
   revisions(limit = 50) {
     return this.db
-      .prepare('SELECT version, created_at AS createdAt, source FROM revisions ORDER BY version DESC LIMIT ?')
-      .all(limit) as { version: number; createdAt: string; source: string }[];
+      .prepare(
+        `SELECT version, created_at AS createdAt, source,
+                json_array_length(data, '$.blocks') AS blocks, json_array_length(data, '$.teachers') AS teachers
+         FROM revisions ORDER BY version DESC LIMIT ?`,
+      )
+      .all(limit) as { version: number; createdAt: string; source: string; blocks: number; teachers: number }[];
+  }
+
+  /** Indholdet af en tidligere version (til gendannelse). */
+  revision(version: number): { version: number; createdAt: string; data: AppData } | null {
+    const row = this.db.prepare('SELECT version, created_at, data FROM revisions WHERE version = ?').get(version) as
+      | { version: number; created_at: string; data: string }
+      | undefined;
+    return row ? { version: row.version, createdAt: row.created_at, data: JSON.parse(row.data) as AppData } : null;
+  }
+
+  /** SQLite's egen integritetskontrol. Returnerer 'ok' eller en beskrivelse af problemet. */
+  integrityCheck(): string {
+    const rows = this.db.pragma('quick_check') as { quick_check: string }[];
+    return rows.map((r) => r.quick_check).join('; ');
+  }
+
+  /**
+   * Konsistent kopi af databasen (SQLite online backup) til `dir`, én fil pr. dag.
+   * Beholder de nyeste `keep` filer. Returnerer stien eller null, hvis dagens kopi findes.
+   */
+  async backupTo(dir: string, keep: number): Promise<string | null> {
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `ugeskema-${new Date().toISOString().slice(0, 10)}.sqlite`);
+    if (fs.existsSync(file)) return null;
+    await this.db.backup(`${file}.tmp`);
+    fs.renameSync(`${file}.tmp`, file);
+    const old = fs
+      .readdirSync(dir)
+      .filter((f) => /^ugeskema-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f))
+      .sort()
+      .reverse()
+      .slice(keep);
+    for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
+    return file;
   }
 
   /** Hemmelighed til signering af sessioner; genereres én gang og gemmes. */

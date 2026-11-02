@@ -1,6 +1,7 @@
 // Indstillinger: stamdata (lærere, fag, hold, sale), beregningssatser, dagdele og data/backup.
 // Hver ændring er én fortrydbar handling via onCommit.
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { api, type RevisionInfo } from './api';
 import { prepMinutesPerHour } from '../../shared/calc';
 import { TEACHER_PALETTE } from '../../shared/colors';
 import type { AppData, Teacher } from '../../shared/schema';
@@ -19,6 +20,8 @@ interface Props {
   onClose: () => void;
   onImportFile: (file: File) => void;
   onLoadDemo: () => void;
+  onRestoreRevision: (version: number) => void;
+  currentVersion: number;
   demoMode: boolean;
   undo: { onUndo: () => void; onRedo: () => void; undoLabel?: string; redoLabel?: string };
 }
@@ -514,7 +517,63 @@ function DaypartsTab({ data, onCommit }: Props) {
 }
 
 // ---- Data og backup ------------------------------------------------------------------
-function DataTab({ data, onImportFile, onLoadDemo, demoMode }: Props) {
+const SOURCE_LABELS: Record<string, string> = { edit: 'Redigering', import: 'Import', demo: 'Eksempeldata', init: 'Oprettet' };
+
+/** Liste over gemte versioner på serveren; en gendannelse er én fortrydbar handling. */
+function Revisions({ onRestore, currentVersion }: { onRestore: (v: number) => void; currentVersion: number }) {
+  const [list, setList] = useState<RevisionInfo[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => {
+    api.revisions().then(setList, (e) => setError((e as Error).message));
+  }, [currentVersion]);
+  if (error) return <p className="error-text small">Kunne ikke hente versioner: {error}</p>;
+  if (!list) return <p className="muted small">Henter versioner…</p>;
+  const shown = showAll ? list : list.slice(0, 8);
+  return (
+    <>
+      <table className="settings-table rev-table">
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Gemt</th>
+            <th>Type</th>
+            <th>Indhold</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((r) => (
+            <tr key={r.version}>
+              <td className="num">{r.version}</td>
+              <td>{new Date(r.createdAt).toLocaleString('da-DK', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+              <td>{SOURCE_LABELS[r.source] ?? r.source}</td>
+              <td className="muted">
+                {r.blocks} blokke · {r.teachers} lærere
+              </td>
+              <td className="actions">
+                {r.version === currentVersion ? (
+                  <span className="muted small">Nuværende</span>
+                ) : (
+                  <button className="btn btn-sm" onClick={() => onRestore(r.version)}>
+                    Gendan
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {list.length > 8 && (
+        <button className="link small" onClick={() => setShowAll(!showAll)}>
+          {showAll ? 'Vis færre' : `Vis alle ${list.length}`}
+        </button>
+      )}
+    </>
+  );
+}
+
+function DataTab({ data, onImportFile, onLoadDemo, demoMode, onRestoreRevision, currentVersion }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const empty = !data.blocks.length && !data.teachers.length && !data.subjects.length && !data.groups.length;
   return (
@@ -543,6 +602,14 @@ function DataTab({ data, onImportFile, onLoadDemo, demoMode }: Props) {
         <button className="btn" onClick={() => fileRef.current?.click()}>
           <Icon name="upload" size={14} /> Vælg backupfil…
         </button>
+      </section>
+      <section>
+        <h3>Tidligere versioner</h3>
+        <p className="muted small">
+          Serveren gemmer de seneste 500 versioner. En gendannelse erstatter det nuværende skema og kan fortrydes. Derudover
+          tager serveren en daglig kopi af hele databasen.
+        </p>
+        <Revisions onRestore={onRestoreRevision} currentVersion={currentVersion} />
       </section>
       <section>
         <h3>Eksempeldata</h3>

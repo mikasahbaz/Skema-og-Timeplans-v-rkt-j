@@ -142,6 +142,66 @@ describe('API', () => {
     expect(form.status).toBe(415);
   });
 
+  it('skift af adgangskode gør gamle logins ugyldige', async () => {
+    const first = await start({ ADMIN_PASSWORD: 'gammelt-kodeord' });
+    const { cookie } = await login(first.base, 'gammelt-kodeord');
+    expect((await fetch(`${first.base}/api/data`, { headers: { cookie } })).status).toBe(200);
+    servers.pop()!.close();
+    const second = await start({ ADMIN_PASSWORD: 'nyt-kodeord-123' }, first.file);
+    expect((await fetch(`${second.base}/api/data`, { headers: { cookie } })).status).toBe(401);
+  });
+
+  it('en læse-cookie kan ikke ændres til administrator', async () => {
+    const { base } = await start({ VIEWER_PASSWORD: 'kig' });
+    const { cookie } = await login(base, 'kig');
+    const [name, value] = cookie.split('=');
+    const [payload, sig] = value.split('.');
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url').toString()), r: 'admin' })).toString('base64url');
+    expect((await fetch(`${base}/api/data`, { headers: { cookie: `${name}=${forged}.${sig}` } })).status).toBe(401);
+  });
+
+  it('login spærres efter 20 forkerte forsøg, ikke før', async () => {
+    const { base } = await start();
+    for (let i = 0; i < 19; i++) expect((await login(base, 'forkert')).res.status).toBe(401);
+    expect((await login(base)).res.status).toBe(200);
+    for (let i = 0; i < 20; i++) await login(base, 'forkert');
+    expect((await login(base)).res.status).toBe(429);
+  });
+
+  it('tidligere versioner kan listes og hentes', async () => {
+    const { base } = await start();
+    const { cookie } = await login(base);
+    await fetch(`${base}/api/data`, json(cookie, { baseVersion: 1, data: demoAppData() }));
+    const list = await (await fetch(`${base}/api/revisions`, { headers: { cookie } })).json();
+    expect(list.map((r: { version: number }) => r.version)).toEqual([2, 1]);
+    expect(list[0].blocks).toBe(demoAppData().blocks.length);
+    const rev1 = await (await fetch(`${base}/api/revisions/1`, { headers: { cookie } })).json();
+    expect(rev1.data.blocks).toEqual([]);
+    expect((await fetch(`${base}/api/revisions/999`, { headers: { cookie } })).status).toBe(404);
+    expect((await fetch(`${base}/api/revisions/1`)).status).toBe(401);
+  });
+
+  it('sender sikkerhedsheadere og danske fejlbeskeder', async () => {
+    const { base } = await start();
+    const res = await fetch(`${base}/api/session`);
+    expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    const { cookie } = await login(base);
+    const bad = await (await fetch(`${base}/api/data`, json(cookie, { baseVersion: 1, data: {} }))).json();
+    expect(bad.errors.join(' ')).not.toMatch(/Invalid input|expected/);
+  });
+
+  it('daglig backup af databasen', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ugeskema-bak-'));
+    const { Store } = await import('../../server/db');
+    const store = new Store(path.join(dir, 'db.sqlite'));
+    const file = await store.backupTo(path.join(dir, 'backups'), 2);
+    expect(file && fs.existsSync(file)).toBe(true);
+    expect(await store.backupTo(path.join(dir, 'backups'), 2)).toBeNull(); // kun én pr. dag
+    expect(store.integrityCheck()).toBe('ok');
+    store.close();
+  });
+
   it('demotilstand bruger sin egen databasefil', () => {
     const c = loadConfig({ DEMO_MODE: '1', DATA_DIR: '/tmp/x' });
     expect(c.dbFile).toBe('/tmp/x/demo.sqlite');

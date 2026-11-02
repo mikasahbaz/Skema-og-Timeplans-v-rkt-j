@@ -1,6 +1,9 @@
 // Datamodel og strukturel validering, delt mellem klient og server.
 import { z } from 'zod';
 
+// Danske standardbeskeder for valideringsfejl, der ikke har en egen tekst.
+z.config(z.locales.da());
+
 export const DAY_COUNT = 6; // mandag (0) … lørdag (5)
 export const SATURDAY = 5;
 export const ROOM_COUNT = 8;

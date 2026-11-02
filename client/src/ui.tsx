@@ -1,5 +1,5 @@
 // Små genbrugelige UI-byggesten: ikoner, modal, forankret panel, toasts, initialmærker.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { deepen } from '../../shared/colors';
 import type { Teacher } from '../../shared/schema';
 
@@ -234,17 +234,20 @@ export interface Toast {
   text: string;
   kind?: 'info' | 'error' | 'success';
   action?: { label: string; run: () => void };
+  /** Toasts i samme gruppe erstatter hinanden (fx historik, så en gammel "Fortryd" ikke kan fortryde noget andet). */
+  group?: string;
 }
 
 let toastSeq = 0;
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = (t: Omit<Toast, 'id'>, ms = 5000) => {
+  // Stabile funktioner, så effekter, der afhænger af dem, ikke genstartes ved hver gengivelse.
+  const push = useCallback((t: Omit<Toast, 'id'>, ms = 5000) => {
     const id = ++toastSeq;
-    setToasts((list) => [...list.slice(-3), { ...t, id }]);
+    setToasts((list) => [...list.filter((x) => !t.group || x.group !== t.group).slice(-3), { ...t, id }]);
     setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), ms);
-  };
-  const dismiss = (id: number) => setToasts((list) => list.filter((x) => x.id !== id));
+  }, []);
+  const dismiss = useCallback((id: number) => setToasts((list) => list.filter((x) => x.id !== id)), []);
   return { toasts, push, dismiss };
 }
 

@@ -61,7 +61,9 @@ viser et tydeligt **DEMOTILSTAND**-mærke. Produktionsdatabasen berøres ikke.
 | `DEMO_MODE` | – | `1` = demotilstand med egen database |
 | `SESSION_SECRET` | genereres og gemmes i databasen | Nøgle til at signere login-cookies |
 | `COOKIE_SECURE` | `true` i produktion | Kræv HTTPS for login-cookien. Sæt `false` kun ved ren http på et lokalnet |
-| `TRUST_PROXY` | `false` | Sæt `true` bag en HTTPS-proxy/hostingplatform |
+| `TRUST_PROXY` | `false` | Sæt `true` bag en HTTPS-proxy/hostingplatform (ellers ser login-spærringen alle brugere som samme IP) |
+| `BACKUP_DIR` | `<databasemappe>/backups` | Mappe til den daglige kopi af databasen. `off` slår det fra |
+| `BACKUP_KEEP` | `14` | Antal daglige kopier, der beholdes |
 
 ## Brug
 
@@ -85,7 +87,8 @@ viser et tydeligt **DEMOTILSTAND**-mærke. Produktionsdatabasen berøres ikke.
 9. **Fortryd / Annuller fortryd**: knapperne i topbjælken, `Ctrl/⌘+Z` og `Ctrl/⌘+Shift+Z` /
    `Ctrl+Y` (op til 100 trin i den aktuelle session). `?` viser alle genveje.
 10. **Backup**: **Indstillinger → Data og backup** → *Download backup* (JSON). Import kontrolleres
-    først og viser præcis, hvad der erstattes.
+    først og viser præcis, hvad der erstattes. Under **Tidligere versioner** kan enhver af de
+    seneste 500 gemte versioner gendannes (det kan fortrydes).
 
 Ændringer gemmes automatisk. Status vises som **Gemmer…**, **Gemt** eller **Kunne ikke gemme**.
 Ved fejl bevares ændringerne i browseren og kan prøves igen. Hvis skemaet er ændret i et andet
@@ -114,9 +117,13 @@ Railway m.fl.) kan bruge samme `Dockerfile` med en volumen monteret på `/data`.
 Vigtigt ved drift:
 
 - Kør **én** instans (SQLite-filen må ikke deles mellem flere servere).
-- Tag løbende backup af `/data` eller brug *Download backup*. Serveren gemmer desuden de
-  seneste 500 versioner i tabellen `revisions`.
-- Brug HTTPS. Login-cookien er `HttpOnly`, `SameSite=Strict` og `Secure` i produktion.
+- Serveren tager selv en daglig kopi af databasen i `/data/backups` (14 dage) og gemmer de
+  seneste 500 versioner, som kan gendannes fra appen. Kopierne ligger på samme disk, så tag også
+  jævnligt en ekstern backup (*Download backup* eller en kopi af `/data`).
+- Brug HTTPS. Login-cookien er `HttpOnly`, `SameSite=Strict` og `Secure` i produktion. Skiftes
+  `ADMIN_PASSWORD`, logges alle administratorer automatisk ud.
+- Serveren sender sikkerhedsheadere (CSP, X-Frame-Options m.fl.), spærrer login efter 20
+  forkerte forsøg pr. IP på 10 minutter og kontrollerer databasens integritet ved opstart.
 
 ## Tests
 

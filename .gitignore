@@ -4,3 +4,4 @@ data/*.sqlite*
 test-results
 playwright-report
 .env
+school.html

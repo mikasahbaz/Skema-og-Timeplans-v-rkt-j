@@ -14,6 +14,11 @@ Status og næste skridt: [WORK_STATUS.md](WORK_STATUS.md).
 - Hver brugerhandling = ét `commit(label, nextData)` = ét fortryd-trin. Brug rene funktioner i
   `client/src/ops.ts` til at lave ny data.
 - Blokændringer går gennem `proposeBlock` i `Editor.tsx` (validering + konfliktdialog).
+- Tider for almindelige klasser kommer KUN fra tidstabellen via `shared/rules.ts`
+  (`resolveTime`/`placeBlock`). Opfind aldrig tider; "Egne tider" (`timeMode: 'custom'`) røres ikke.
+- Hovedskærmen har kun fire elementer (skema, timer, "Tilføj ny klasse", tandhjul). Nye funktioner
+  hører bag tandhjulet (`Settings.tsx`).
+- Ændres datamodellen: hæv `SCHEMA_VERSION` og udvid `shared/migrate.ts`; intet må slettes.
 - Serveren er autoritativ; skriv kun med administratorsession og `baseVersion`.
 - Demodata kun via `DEMO_MODE` (egen DB-fil) eller i et helt tomt skema.
 

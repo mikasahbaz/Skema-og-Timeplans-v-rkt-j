@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
-import { emptyAppData, type AppData } from '../shared/schema.js';
+import { initialAppData } from '../shared/demo.js';
+import { migrateAny, type MigrationReport } from '../shared/migrate.js';
+import type { AppData } from '../shared/schema.js';
 
 const MAX_REVISIONS = 500;
 
@@ -19,7 +21,7 @@ export type SaveResult = { ok: true; state: StoredState } | { ok: false; conflic
 export class Store {
   private db: Database.Database;
 
-  constructor(file: string, seed: () => AppData = emptyAppData) {
+  constructor(file: string, seed: () => AppData = initialAppData) {
     if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new Database(file);
     this.db.pragma('journal_mode = WAL');
@@ -46,6 +48,18 @@ export class Store {
       this.db.prepare('INSERT INTO app_state (id, version, data, updated_at) VALUES (1, 1, ?, ?)').run(json, now);
       this.db.prepare('INSERT INTO revisions (version, data, created_at, source) VALUES (1, ?, ?, ?)').run(json, now, 'init');
     }
+  }
+
+  /**
+   * Bringer de gemte data op på den aktuelle datamodel (gemmes som ny version, så den gamle
+   * kan gendannes). Returnerer en rapport, hvis der blev migreret.
+   */
+  migrate(): MigrationReport | null {
+    const row = this.db.prepare('SELECT version, data FROM app_state WHERE id = 1').get() as { version: number; data: string };
+    const { data, report } = migrateAny(JSON.parse(row.data));
+    if (!report) return null;
+    const saved = this.save(row.version, data as AppData, 'migration');
+    return saved.ok ? report : null;
   }
 
   get(): StoredState {

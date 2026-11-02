@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { STANDALONE } from './api';
 import { installStandaloneServer } from './standalone';
+import '@fontsource-variable/plus-jakarta-sans';
 import './styles.css';
 
 function boot() {

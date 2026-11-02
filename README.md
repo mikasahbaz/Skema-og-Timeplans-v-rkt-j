@@ -77,33 +77,38 @@ viser et tydeligt **DEMOTILSTAND**-mærke. Produktionsdatabasen berøres ikke.
 
 ## Brug
 
-1. **Indstillinger → Lærere / Fag / Hold**: opret stamdata. Lærere får automatisk en fast
-   pastelfarve. Angiv årsarbejdstimer pr. lærer (tomt felt = mangler; 0 er en gyldig værdi).
-2. **Indstillinger → Beregning**: forberedelsesprocent, lørdagstillæg, forberedelsesgrundlag og
-   antal undervisningsuger. **Sale** og **Dagdele** kan omdøbes/justeres.
-3. **Opret blok**: klik i en tom celle (dag, sal og dagdel er forudvalgt) eller på **Ny blok** (`N`).
-4. **Rediger**: klik på en blok. Vælg 1–2 lærere, tid, hold, fag og evt. note. **Del** deler en blok
-   i to sammenhængende blokke, fx når en ekstra lærer kun er med en del af tiden.
-5. **Flyt**: træk blokken (mus, eller hold fingeren på den et øjeblik på touch). Samme dagdel
-   bevarer klokkeslættet; en anden dagdel åbner en tidsvælger med bevaret varighed. Alternativt
-   ⋯-menuen → **Flyt…** eller tasten `M`, og vælg målcelle med klik eller piletaster + Enter.
-6. **Kopiér**: ⋯ → **Kopiér…** (eller `K`, eller hold `Alt` mens du trækker). Kopien får nyt id.
-7. **Konflikter** (samme sal, lærer eller hold på samme tid) vises før ændringen gemmes. Vælg
-   **Behold med konflikt** eller **Annuller ændringen**. Beholdte konflikter markeres med orange
-   ramme og samles under konfliktknappen i topbjælken.
-8. **Timeoverblik** til højre (eller nederst – skift med knappen i topbjælken; træk i kanten for at
-   ændre størrelse). Vælg en lærer for detaljer pr. ugedag, fag og hold og årsfremskrivning.
-   Filtre i topbjælken ændrer kun skemavisningen, aldrig opgørelsen.
-9. **Fortryd / Annuller fortryd**: knapperne i topbjælken, `Ctrl/⌘+Z` og `Ctrl/⌘+Shift+Z` /
-   `Ctrl+Y` (op til 100 trin i den aktuelle session). `?` viser alle genveje.
-10. **Backup**: **Indstillinger → Data og backup** → *Download backup* (JSON). Import kontrolleres
-    først og viser præcis, hvad der erstattes. Under **Tidligere versioner** kan enhver af de
-    seneste 500 gemte versioner gendannes (det kan fortrydes).
+Hovedskærmen har kun skemaet, timeoptællingen, **Tilføj ny klasse** og tandhjulet.
 
-Ændringer gemmes automatisk. Status vises som **Gemmer…**, **Gemt** eller **Kunne ikke gemme**.
-Ved fejl bevares ændringerne i browseren og kan prøves igen. Hvis skemaet er ændret i et andet
-vindue, afvises gemningen, og du vælger selv: hent nyeste, overskriv bevidst eller download dine
-ændringer.
+1. **Tilføj ny klasse**: vælg hold (ét eller flere), lærer(e) og evt. titel (standard
+   "Balletklasse"). Tryk **Opret og placér**, og tryk derefter på en celle eller træk kortet derhen.
+   Du kan også trykke direkte på en tom celle.
+2. **Tiden kommer automatisk** fra tidstabellen (hold + ugedag + dagdel). Har tabellen flere tider,
+   vælger du blandt dem; har den ingen, kan du give klassen **Egne tider**.
+3. **Flyt** en klasse ved at trække den (på iPad: hold fingeren et øjeblik). Under træk viser den
+   løftede klasse den tid, den får i cellen. Alt+træk kopierer. Tryk på en klasse for at redigere,
+   flytte, kopiere eller slette den.
+4. **Egne tider** (låsesymbol) bevarer præcis sit klokkeslæt, uanset hvor klassen flyttes.
+5. **Timer pr. uge** til højre: tryk på en lærer for undervisning, forberedelse og lørdagstillæg.
+6. **Tandhjulet** samler alt andet: lærere og hold, tidsregler og morgensamling, satser og
+   årsarbejdstid med detaljeret opgørelse, fortryd/gentag, konflikter, backup og læsevisning.
+7. **Fortryd**: Ctrl/⌘+Z, Gentag: Ctrl/⌘+Shift+Z – eller "Fortryd" i beskeden efter en ændring.
+
+### Tidstabellen fra skemadokumentet
+
+Tiderne er udtrukket fra `Balletskole_Skema_26_27_Master_fra_uge_43.xlsx`, arket **KDS**. Hele
+tabellen med cellehenvisninger står i [docs/tidstabel-kds.md](docs/tidstabel-kds.md). Ændres
+dokumentet, kan udtrækket genskabes:
+
+```bash
+python3 -I scripts/extract_schedule.py Balletskole_Skema_26_27_Master_fra_uge_43.xlsx "KDS " shared/source/kds.ts
+```
+
+```bash
+npx tsx scripts/print-rules.ts
+```
+
+Kræver Python med `openpyxl`. I appen kan tidstabellen derefter genindlæses under
+Indstillinger → Tidsregler og morgensamling → Kilde.
 
 ## Online drift
 
@@ -141,16 +146,18 @@ Vigtigt ved drift:
 npm test
 ```
 
-Kører enhedstests (beregninger, konflikter, validering, tidsforslag) og API-tests (adgang,
-versionskontrol, validering, persistens, import, demobeskyttelse).
+Kører enhedstests (beregning, tidsregler, kildeudtræk, morgensamling, migrering, konflikter,
+validering) og API-tests (adgang, versionskontrol, validering, persistens, migrering ved opstart,
+import, demobeskyttelse, sikkerhed).
 
 ```bash
 npm run test:e2e
 ```
 
 Kører browsertests med Playwright mod den byggede app (kræver `npm run build` først og en
-installeret Chromium): eksempel A–D, opret, træk med mus og touch, tidsvælger, kopiér, konflikter,
-tastatur, fortryd, lagringsfejl, forældet vindue, læseadgang.
+installeret Chromium) af SPEC.md's kontrolpunkter: hovedskærm, oprettelse, automatiske tider,
+fredag/lørdag, morgensamling, egne tider, fælles klasser, manglende regler, konflikter, ændrede
+tidsregler, fortryd, genindlæsning, lagringsfejl, forældet vindue, læseadgang og iPad med touch.
 
 ```bash
 npm run test:all
@@ -161,7 +168,8 @@ Typekontrol, enhedstests, build og browsertests i ét.
 ## Arkitektur
 
 ```
-shared/   Datamodel (zod), validering, beregning (calc.ts), konflikter, tid – bruges af både klient og server
+shared/   Datamodel (zod), validering, beregning (calc.ts), tidsregler (rules.ts), konflikter,
+          migrering, kildedata (source/) – bruges af både klient og server
 server/   Express 5 + better-sqlite3: adgang, versioneret lagring, eksport/import
 client/   React 19 + Vite + @dnd-kit: skema, redigering, timepanel, indstillinger, læsevisning
 tests/    unit/ og api/ (Vitest), e2e/ (Playwright)

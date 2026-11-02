@@ -1,107 +1,98 @@
-// Administratorens arbejdsflade: skema + timepanel, og al interaktion omkring blokke.
+// Hovedskærmen: skema, kompakt timeoptælling, "Tilføj ny klasse" og tandhjul. Intet andet.
 import {
   DndContext,
   DragOverlay,
   MouseSensor,
   pointerWithin,
   TouchSensor,
+  useDraggable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { computeAllSummaries } from '../../shared/calc';
 import { allConflicts, conflictsForBlock, type Conflict } from '../../shared/conflicts';
 import { newId } from '../../shared/ids';
-import { DAY_NAMES, type AppData, type Block } from '../../shared/schema';
-import { daypartOf, daypartRange, findFreeStart, formatRange, suggestStart, DAYPARTS, type DaypartIndex } from '../../shared/time';
+import { DAY_NAMES, DEFAULT_TITLE, PERIOD_NAMES, type AppData, type Block, type TimeRule } from '../../shared/schema';
+import { sourceWeek, withSourceRules } from '../../shared/source/index';
+import { formatClock, formatDuration, formatRange, parseClock } from '../../shared/time';
 import { validateBlock } from '../../shared/validate';
 import { api, type Session } from './api';
-import { BlockEditor } from './BlockEditor';
-import { ConflictDialog, ConflictOverview } from './Conflicts';
+import { ClassForm } from './ClassForm';
+import { ConflictDialog } from './Conflicts';
 import { DayList, DayTabs } from './DayList';
-import { BlockPreview, emptyFilter, filterActive, parseCellId, ScheduleGrid, type CellRef, type DragState, type Filter, type Placement } from './Grid';
-import { HoursPanel, type Unit } from './HoursPanel';
+import { BlockPreview, groupsLabel, parseCellId, ScheduleGrid, type CellRef, type GridData, type Placement, type PlaceMode } from './Grid';
+import { HoursColumn } from './HoursColumn';
 import { ImportDialog, type ImportState } from './ImportDialog';
 import { LoginForm } from './Login';
 import * as ops from './ops';
-import { Settings } from './Settings';
-import { useEditor, pref, setPref, type EditorStore } from './store';
-import { TimePicker, type TimePickerRequest } from './TimePicker';
-import { Anchored, escapeLayerOpen, Icon, Modal, Toasts, useEscape, useMediaQuery, useToasts } from './ui';
-import { FilterBar } from './FilterBar';
+import { Settings, type SectionId } from './Settings';
+import { pref, setPref, useEditor, type EditorStore } from './store';
+import { Anchored, escapeLayerOpen, Icon, Modal, TeacherChip, Toasts, useEscape, useMediaQuery, useToasts } from './ui';
 
 interface ConflictPrompt {
   label: string;
   next: AppData;
   conflicts: Conflict[];
-  flashId: string;
+  flashId: string | null;
   message: string;
   after?: () => void;
 }
 
-/** Standardbredde for timepanelet: bredere på store skærme, så tabellerne har plads. */
-const defaultPanelSize = () => (window.innerWidth >= 1340 ? Math.round(Math.min(480, Math.max(340, window.innerWidth * 0.25))) : 330);
+type Panel =
+  | { kind: 'block'; block: Block; rect: DOMRect | null; editing: boolean }
+  | { kind: 'add'; rect: DOMRect | null; target: CellRef | null }
+  | null;
+
+interface Pending {
+  kind: 'choice' | 'none';
+  mode: PlaceMode;
+  base: Block;
+  options: TimeRule[];
+  rect: DOMRect | null;
+  source: Block;
+}
 
 const isTyping = (el: EventTarget | null) =>
   el instanceof HTMLElement &&
-  ((el.tagName === 'INPUT' && !['radio', 'checkbox', 'button', 'color'].includes((el as HTMLInputElement).type)) ||
-    el.tagName === 'TEXTAREA' ||
-    el.tagName === 'SELECT' ||
-    el.isContentEditable);
+  ((el.tagName === 'INPUT' && !['radio', 'checkbox', 'button', 'color'].includes((el as HTMLInputElement).type)) || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+
+const VERB: Record<PlaceMode, string> = { move: 'Flyt klasse', copy: 'Kopiér klasse', create: 'Opret klasse' };
 
 export function Editor({ store, session, onLogout }: { store: EditorStore; session: Session; onLogout: () => void }) {
   const data = useEditor(store, (s) => s.data);
   const status = useEditor(store, (s) => s.status);
   const errorMessage = useEditor(store, (s) => s.errorMessage);
-  const pastLen = useEditor(store, (s) => s.past.length);
-  const futureLen = useEditor(store, (s) => s.future.length);
   const nextUndo = useEditor(store, (s) => s.past[s.past.length - 1]?.label);
   const nextRedo = useEditor(store, (s) => s.future[0]?.label);
-  const lastSavedAt = useEditor(store, (s) => s.lastSavedAt);
   const baseVersion = useEditor(store, (s) => s.baseVersion);
 
   const summaries = useMemo(() => computeAllSummaries(data), [data]);
-  const conflicts = useMemo(() => allConflicts(data.blocks), [data.blocks]);
-  const starts = data.settings.daypartStarts;
+  const conflicts = useMemo(() => allConflicts(data), [data]);
+  const grid = useMemo(() => ({ ...data, assembly: data.settings.assembly }), [data]);
 
   const { toasts, push, dismiss } = useToasts();
-  const [filter, setFilter] = useState<Filter>(emptyFilter);
-  const [selectedTeacher, setSelectedTeacher] = useState<string | null>(() => pref('selectedTeacher', null));
-  const [unit, setUnit] = useState<Unit>(() => pref('unit', 'hm'));
-  const [panelPos, setPanelPos] = useState<'right' | 'bottom'>(() => pref('panelPos', window.innerWidth >= 1340 ? 'right' : 'bottom'));
-  const [panelSize, setPanelSize] = useState<number>(() => pref('panelSize', defaultPanelSize()));
-  const [panelOpen, setPanelOpen] = useState<boolean>(() => pref('panelOpen', true));
-  const [editor, setEditor] = useState<{ block: Block; isNew: boolean; anchor: DOMRect | null } | null>(null);
-  const [menu, setMenu] = useState<{ block: Block; rect: DOMRect } | null>(null);
+  const [openTeacher, setOpenTeacher] = useState<string | null>(null);
+  const [panel, setPanel] = useState<Panel>(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
-  const [timeReq, setTimeReq] = useState<TimePickerRequest | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const [prompt, setPrompt] = useState<ConflictPrompt | null>(null);
-  const [settingsTab, setSettingsTab] = useState<string | null>(null);
-  const [showConflicts, setShowConflicts] = useState(false);
+  const [settings, setSettings] = useState<{ section: SectionId | null; teacherId: string | null } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [importState, setImportState] = useState<ImportState | null>(null);
-  const [drag, setDrag] = useState<DragState | null>(null);
+  const [drag, setDrag] = useState<{ block: Block; copy: boolean; draft: boolean } | null>(null);
+  const [overCell, setOverCell] = useState<CellRef | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
   const [mobileTab, setMobileTab] = useState<'schedule' | 'hours'>('schedule');
   const [mobileDay, setMobileDay] = useState(() => Math.min(5, Math.max(0, (new Date().getDay() + 6) % 7)));
+  const [hoursWidth, setHoursWidth] = useState<number>(() => pref('hoursWidth', 264));
   const isMobile = useMediaQuery('(max-width: 760px)');
   const altRef = useRef(false);
-
-  useEffect(() => setPref('selectedTeacher', selectedTeacher), [selectedTeacher]);
-  useEffect(() => setPref('unit', unit), [unit]);
-  useEffect(() => setPref('panelPos', panelPos), [panelPos]);
-  useEffect(() => setPref('panelSize', panelSize), [panelSize]);
-  useEffect(() => setPref('panelOpen', panelOpen), [panelOpen]);
-  useEffect(() => {
-    if (selectedTeacher && !data.teachers.some((t) => t.id === selectedTeacher)) setSelectedTeacher(null);
-  }, [data.teachers, selectedTeacher]);
-  useEffect(() => {
-    if (!selectedTeacher && data.teachers.length) setSelectedTeacher([...data.teachers].sort((a, b) => a.initials.localeCompare(b.initials, 'da'))[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.teachers.length]);
+  useEffect(() => setPref('hoursWidth', hoursWidth), [hoursWidth]);
 
   const flash = useCallback((id: string) => {
     setFlashId(id);
@@ -109,24 +100,23 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   }, []);
 
   const roomName = (id: string) => data.rooms.find((r) => r.id === id)?.name ?? '?';
-  const where = (b: Pick<Block, 'day' | 'roomId' | 'start' | 'end'>) => `${DAY_NAMES[b.day]} · ${roomName(b.roomId)} · ${formatRange(b.start, b.end)}`;
+  const where = (b: Block) => `${DAY_NAMES[b.day]} ${PERIOD_NAMES[b.period].toLowerCase()} · ${roomName(b.roomId)} · ${formatRange(b.start, b.end)}`;
 
-  // ---- Fortryd ---------------------------------------------------------------
+  // ---- Fortryd ----------------------------------------------------------------
   const undo = useCallback(() => {
     const label = store.undo();
-    if (label) push({ text: `Fortrudt: ${label}`, group: 'history', action: { label: 'Annuller fortryd', run: () => store.redo() } }, 4000);
+    if (label) push({ text: `Fortrudt: ${label}`, group: 'history', action: { label: 'Gentag', run: () => store.redo() } }, 4000);
   }, [store, push]);
   const redo = useCallback(() => {
     const label = store.redo();
     if (label) push({ text: `Gentaget: ${label}`, group: 'history' }, 3000);
   }, [store, push]);
 
-  /** Gennemfør en handling (ét historiktrin). Returnerer fejl, hvis valideringen afviser den. */
   const commit = useCallback(
-    (label: string, next: AppData, opts: { flashId?: string; message?: string; quiet?: boolean } = {}): string[] | null => {
+    (label: string, next: AppData, opts: { flashId?: string | null; message?: string; quiet?: boolean } = {}): string[] | null => {
       const r = store.commit(label, next);
       if (!r.ok) {
-        push({ text: `Ikke gennemført: ${r.errors[0]}`, kind: 'error' }, 6000);
+        push({ text: `Ikke gennemført: ${r.errors[0].replace(/^(Klasse|Tidsregel) [^:]+: /, '')}`, kind: 'error' }, 6000);
         return r.errors;
       }
       if (opts.flashId) flash(opts.flashId);
@@ -136,149 +126,93 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     [store, push, flash, undo],
   );
 
-  /** Ændring af én blok: validér, kontrollér konflikter, og spørg ved konflikt. */
+  /** Ændring af én klasse: validér, kontrollér konflikter, og spørg ved konflikt. */
   const proposeBlock = (label: string, next: AppData, changed: Block, message: string, after?: () => void) => {
     const errs = validateBlock(changed, next);
     if (errs.length) {
       push({ text: `Ikke gennemført: ${errs[0]}`, kind: 'error' }, 6000);
       return;
     }
-    const cs = conflictsForBlock(changed, next.blocks);
-    if (cs.length) {
-      setPrompt({ label, next, conflicts: cs, flashId: changed.id, message, after });
-      return;
-    }
+    const cs = conflictsForBlock(changed, next);
+    if (cs.length) return setPrompt({ label, next, conflicts: cs, flashId: changed.id, message, after });
     if (!commit(label, next, { flashId: changed.id, message })) after?.();
   };
 
-  // ---- Opret / rediger ---------------------------------------------------------
-  const newBlockAt = (cell: CellRef, anchor: DOMRect | null) => {
-    const ends = data.blocks.filter((b) => b.day === cell.day && b.roomId === cell.roomId && daypartOf(b.start, starts) === cell.daypart).map((b) => b.end);
-    const start = findFreeStart({
-      preferred: suggestStart(cell.daypart, starts, 60, ends),
-      duration: 60,
-      busy: data.blocks.filter((b) => b.day === cell.day && b.roomId === cell.roomId),
-      range: daypartRange(cell.daypart, starts),
-      stayInRange: true,
-    });
-    const only = <T extends { id: string; archived: boolean }>(list: T[]) => {
-      const active = list.filter((x) => !x.archived);
-      return active.length === 1 ? active[0].id : '';
-    };
-    const block: Block = {
-      id: newId('b'),
-      day: cell.day,
-      roomId: cell.roomId,
-      start,
-      end: Math.min(1440, start + 60),
-      subjectId: only(data.subjects),
-      groupId: only(data.groups),
-      teacherIds: only(data.teachers) ? [only(data.teachers)] : [],
-      note: '',
-    };
-    setEditor({ block, isNew: true, anchor });
-  };
-
-  const onCellClick = (cell: CellRef, rect: DOMRect) => {
-    if (placement) {
-      const block = data.blocks.find((b) => b.id === placement.blockId);
-      if (block) placeAt(placement.mode, block, cell, rect);
-      return;
-    }
-    newBlockAt(cell, rect);
-  };
-
-  const saveFromEditor = (block: Block) => {
-    const isNew = editor?.isNew;
-    const before = data.blocks.find((b) => b.id === block.id);
-    if (!isNew && before && JSON.stringify(before) === JSON.stringify(block)) {
-      setEditor(null); // ingen ændring → intet historiktrin
-      return;
-    }
-    proposeBlock(isNew ? 'Opret blok' : 'Rediger blok', ops.upsertBlock(data, block), block, isNew ? `Oprettet: ${where(block)}` : `Gemt: ${where(block)}`, () =>
-      setEditor(null),
-    );
-  };
-
-  const deleteBlock = (block: Block) => {
-    commit('Slet blok', ops.deleteBlock(data, block.id), { message: `Slettet: ${where(block)}` });
-    setEditor(null);
-    setMenu(null);
-  };
-
-  // ---- Flyt / kopiér --------------------------------------------------------------
-  const startPlacement = (mode: 'move' | 'copy', block: Block) => {
-    setEditor(null);
-    setMenu(null);
-    setPlacement({ mode, blockId: block.id });
-    setTimeout(() => {
-      const el =
-        document.querySelector<HTMLElement>(`[data-cell="cell|${block.day}|${daypartOf(block.start, starts)}|${block.roomId}"] .place-target`) ??
-        document.querySelector<HTMLElement>('.place-target');
-      el?.focus();
-    }, 30);
-  };
-  useEscape(() => setPlacement(null), Boolean(placement));
-
-  const finishPlace = (mode: 'move' | 'copy', block: Block, day: number, roomId: string, start: number) => {
-    const dur = block.end - block.start;
-    const timeNote = start !== block.start ? ` (før ${formatRange(block.start, block.end)})` : '';
-    if (mode === 'move') {
-      const changed: Block = { ...block, day, roomId, start, end: start + dur };
-      proposeBlock('Flyt blok', ops.upsertBlock(data, changed), changed, `Flyttet til ${where(changed)}${timeNote}`, () => setTimeReq(null));
-    } else {
-      const copy = ops.copyOf(block, { day, roomId, start, end: start + dur });
-      proposeBlock('Kopiér blok', ops.upsertBlock(data, copy), copy, `Kopi oprettet: ${where(copy)}`, () => setTimeReq(null));
-    }
-  };
-
-  const placeAt = (mode: 'move' | 'copy', block: Block, cell: CellRef, rect: DOMRect | null) => {
+  // ---- Placering (opret, flyt, kopiér) ------------------------------------------
+  const clearPlacing = () => {
     setPlacement(null);
-    const srcDp = daypartOf(block.start, starts);
-    const sameCell = block.day === cell.day && block.roomId === cell.roomId && srcDp === cell.daypart;
-    if (mode === 'move' && sameCell) return;
-    if (srcDp === cell.daypart && !sameCell) {
-      finishPlace(mode, block, cell.day, cell.roomId, block.start);
-      return;
-    }
-    const dur = block.end - block.start;
-    const others = data.blocks.filter((b) => b.day === cell.day && !(mode === 'move' && b.id === block.id));
-    const ends = others.filter((b) => b.roomId === cell.roomId && daypartOf(b.start, starts) === cell.daypart).map((b) => b.end);
-    // Optaget: samme sal, samme hold eller en af blokkens lærere – så forslaget er konfliktfrit, hvis muligt.
-    const busy = others.filter((b) => b.roomId === cell.roomId || b.groupId === block.groupId || b.teacherIds.some((t) => block.teacherIds.includes(t)));
-    const suggested = sameCell
-      ? findFreeStart({ preferred: block.end, duration: dur, busy, range: daypartRange(cell.daypart, starts) })
-      : findFreeStart({ preferred: suggestStart(cell.daypart, starts, dur, ends), duration: dur, busy, range: daypartRange(cell.daypart, starts), stayInRange: true });
-    setTimeReq({
-      mode,
-      block,
-      day: cell.day,
-      roomId: cell.roomId,
-      roomName: roomName(cell.roomId),
-      daypart: cell.daypart,
-      suggested,
-      anchor: rect,
+    setPending(null);
+  };
+
+  const finalize = (mode: PlaceMode, source: Block, placed: Block) => {
+    const timeNote = mode === 'move' && (placed.start !== source.start || placed.end !== source.end) ? ` (før ${formatRange(source.start, source.end)})` : '';
+    const msg = mode === 'create' ? `Oprettet: ${where(placed)}` : mode === 'copy' ? `Kopi: ${where(placed)}` : `Flyttet: ${where(placed)}${timeNote}`;
+    proposeBlock(VERB[mode], ops.upsertBlock(data, placed), placed, msg, () => {
+      clearPlacing();
+      setPanel(null);
     });
   };
 
-  // ---- Træk og slip -----------------------------------------------------------------
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
-  );
+  const attemptPlace = (mode: PlaceMode, source: Block, target: CellRef, rect: DOMRect | null) => {
+    const isSame = source.day === target.day && source.period === target.period && source.roomId === target.roomId;
+    if (mode === 'move' && isSame) return clearPlacing();
+    const block = mode === 'copy' ? ops.copyOf(source) : source;
+    const out = ops.placeBlock(data, block, target);
+    if (out.kind === 'ok') return finalize(mode, source, out.block);
+    setPending({ kind: out.kind, mode, base: out.base, options: out.kind === 'choice' ? out.options : [], rect, source });
+  };
+
+  /** Forventet tid i en målcelle – vises under træk og ved placering. */
+  const previewFor = (block: Block, cell: CellRef) => {
+    if (block.day === cell.day && block.period === cell.period && block.roomId === cell.roomId && data.blocks.some((b) => b.id === block.id)) return '';
+    const out = ops.placeBlock(data, block, cell);
+    if (out.kind === 'ok') return `${formatRange(out.block.start, out.block.end)}${block.timeMode === 'custom' ? ' · egne tider' : ''}`;
+    if (out.kind === 'choice') return `${out.options.length} tidsrum – vælg`;
+    return 'Ingen tidsregel';
+  };
+
+  const startPlacement = (mode: 'move' | 'copy', block: Block) => {
+    setPanel(null);
+    setPlacement({ mode, block });
+    setTimeout(() => document.querySelector<HTMLElement>(`[data-cell="cell|${block.day}|${block.period}|${block.roomId}"] .place-target`)?.focus(), 30);
+  };
+  useEscape(clearPlacing, Boolean(placement) && !pending);
+
+  const onCellTap = (cell: CellRef, rect: DOMRect) => {
+    if (placement) return attemptPlace(placement.mode, placement.block, cell, rect);
+    setPanel({ kind: 'add', rect, target: cell });
+  };
+
+  const newDraft = (target: CellRef | null): Block => ({
+    id: newId('b'),
+    title: DEFAULT_TITLE,
+    groupIds: [],
+    teacherIds: [],
+    day: target?.day ?? 0,
+    period: target?.period ?? 0,
+    roomId: target?.roomId ?? data.rooms[0].id,
+    start: 0,
+    end: 1,
+    timeMode: 'rule',
+    ruleId: null,
+    note: '',
+  });
+
+  const deleteBlock = (b: Block) => {
+    commit('Slet klasse', ops.deleteBlock(data, b.id), { message: `Slettet: ${b.title} · ${where(b)}` });
+    setPanel(null);
+  };
+
+  // ---- Træk og slip ---------------------------------------------------------------
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }));
   useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') {
-        altRef.current = true;
-        setDrag((d) => (d ? { ...d, copy: true } : d));
-      }
+    const set = (v: boolean) => (e: KeyboardEvent) => {
+      if (e.key !== 'Alt') return;
+      altRef.current = v;
+      setDrag((d) => (d && !d.draft ? { ...d, copy: v } : d));
     };
-    const up = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') {
-        altRef.current = false;
-        setDrag((d) => (d ? { ...d, copy: false } : d));
-      }
-    };
+    const down = set(true);
+    const up = set(false);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => {
@@ -286,61 +220,54 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
       window.removeEventListener('keyup', up);
     };
   }, []);
-
   const onDragStart = (e: DragStartEvent) => {
+    setPanel(null);
+    if (e.active.id === 'draft' && placement?.mode === 'create') return setDrag({ block: placement.block, copy: false, draft: true });
     const block = data.blocks.find((b) => b.id === e.active.id);
-    const ev = e.activatorEvent as MouseEvent;
-    if (block) setDrag({ block, copy: Boolean(ev?.altKey) || altRef.current });
+    if (block) setDrag({ block, copy: Boolean((e.activatorEvent as MouseEvent)?.altKey) || altRef.current, draft: false });
   };
+  const onDragOver = (e: DragOverEvent) => setOverCell(e.over ? parseCellId(String(e.over.id)) : null);
   const onDragEnd = (e: DragEndEvent) => {
     const d = drag;
     setDrag(null);
+    setOverCell(null);
     if (!d || !e.over) return;
     const cell = parseCellId(String(e.over.id));
     if (!cell) return;
     const r = e.over.rect;
-    placeAt(d.copy ? 'copy' : 'move', d.block, cell, new DOMRect(r.left, r.top, r.width, r.height));
+    attemptPlace(d.draft ? 'create' : d.copy ? 'copy' : 'move', d.block, cell, new DOMRect(r.left, r.top, r.width, r.height));
   };
 
-  // ---- Tastaturgenveje ----------------------------------------------------------------
+  // ---- Tastatur -----------------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 'z' && !isTyping(e.target)) {
+      if (mod && !isTyping(e.target) && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
         e.preventDefault();
-        if (e.shiftKey) redo();
+        if (e.key.toLowerCase() === 'y' || e.shiftKey) redo();
         else undo();
-        return;
-      }
-      if (mod && e.key.toLowerCase() === 'y' && !isTyping(e.target)) {
-        e.preventDefault();
-        redo();
         return;
       }
       if (mod || e.altKey || isTyping(e.target) || escapeLayerOpen()) return;
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
-        newBlockAt({ day: isMobile ? mobileDay : 0, daypart: 0, roomId: data.rooms[0].id }, null);
-      } else if (e.key === '?') {
-        setShowHelp(true);
-      }
+        setPanel({ kind: 'add', rect: null, target: null });
+      } else if (e.key === '?') setShowHelp(true);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
-
-  const onBlockKey = (block: Block, e: ReactKeyboardEvent<HTMLElement>) => {
+  const onBlockKey = (b: Block, e: ReactKeyboardEvent<HTMLElement>) => {
     const k = e.key.toLowerCase();
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (k === 'm') startPlacement('move', block);
-    else if (k === 'k' || k === 'c') startPlacement('copy', block);
-    else if (k === 'delete' || k === 'backspace') deleteBlock(block);
-    else if (k === 'e') setEditor({ block, isNew: false, anchor: e.currentTarget.getBoundingClientRect() });
+    if (k === 'm') startPlacement('move', b);
+    else if (k === 'k' || k === 'c') startPlacement('copy', b);
+    else if (k === 'delete' || k === 'backspace') deleteBlock(b);
     else return;
     e.preventDefault();
   };
 
-  // ---- Lagring: advarsel ved lukning og opdatering fra andre sessioner ---------------
+  // ---- Lagring, opdatering fra andre sessioner --------------------------------------
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
       if (store.dirty) {
@@ -351,7 +278,6 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     window.addEventListener('beforeunload', h);
     return () => window.removeEventListener('beforeunload', h);
   }, [store]);
-
   useEffect(() => {
     const poll = async () => {
       if (document.hidden) return;
@@ -362,11 +288,11 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
           const fresh = await api.data();
           if (!store.dirty) {
             store.replaceFromServer(fresh.data, fresh.version);
-            push({ text: 'Skemaet blev opdateret fra en anden session. Fortryd-historikken er nulstillet.' }, 6000);
+            push({ text: 'Skemaet blev opdateret fra en anden session.' }, 6000);
           }
         }
       } catch {
-        /* polling-fejl vises ikke; lagringsstatus viser fejl ved gem */
+        /* lagringsstatus viser fejl ved gem */
       }
     };
     const t = setInterval(poll, 15000);
@@ -383,29 +309,37 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     push({ text: message }, 6000);
   };
 
-  const downloadLocal = () => {
-    const blob = new Blob([JSON.stringify({ format: 'ballet-ugeskema-backup', formatVersion: 1, exportedAt: new Date().toISOString(), data: store.getState().data }, null, 2)], {
-      type: 'application/json',
-    });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `ugeskema-ikke-gemt-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  // ---- Indstillinger: tidsregler, kilde, backup ----------------------------------------
+  const onRules = (label: string, result: ReturnType<typeof ops.updateRules>): string[] | null => {
+    const before = conflicts.pairs.length;
+    const after = allConflicts(result.data);
+    const n = result.changed.length;
+    const msg = `${label}${n ? ` – ${n} ${n === 1 ? 'klasse' : 'klasser'} fik ny tid` : ''}${result.toCustom.length ? ` · ${result.toCustom.length} uden entydig regel beholder tiden som egne tider` : ''}`;
+    if (after.pairs.length > before) {
+      const ids = new Set(result.changed);
+      const fresh = after.pairs.filter((c) => ids.has(c.blockId) || ids.has(c.otherId));
+      setPrompt({ label, next: result.data, conflicts: fresh.length ? fresh : after.pairs, flashId: null, message: msg });
+      return null;
+    }
+    return commit(label, result.data, { message: msg });
   };
-
-  // ---- Import og demodata -------------------------------------------------------------
+  const loadSourceWeek = () => {
+    const w = sourceWeek(data);
+    commit('Indlæs ugeskema fra kilden', w.data, { message: `Ugeskemaet er indlæst: ${w.data.blocks.length} klasser. ${w.unplaced.length} klasser i K-salen kunne ikke placeres.` });
+  };
+  const reloadSourceRules = () => {
+    const s = withSourceRules(data);
+    onRules('Genindlæs tidsregler fra kilden', ops.updateRules({ ...data, groups: s.groups }, s.timeRules));
+  };
   const onImportFile = async (file: File) => {
     let json: unknown;
     try {
       json = JSON.parse(await file.text());
     } catch {
-      push({ text: 'Filen er ikke gyldig JSON.', kind: 'error' });
-      return;
+      return push({ text: 'Filen er ikke en gyldig backupfil.', kind: 'error' });
     }
     try {
-      const preview = await api.importPreview(json);
-      setImportState({ fileName: file.name, json, preview });
+      setImportState({ fileName: file.name, json, preview: await api.importPreview(json) });
     } catch (e) {
       push({ text: `Kunne ikke kontrollere filen: ${(e as Error).message}`, kind: 'error' });
     }
@@ -413,15 +347,12 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   const confirmImport = async () => {
     if (!importState) return;
     await store.flush();
-    if (store.dirty) {
-      push({ text: 'Der er ændringer, som ikke er gemt endnu. Løs lagringsproblemet før import.', kind: 'error' });
-      return;
-    }
+    if (store.dirty) return push({ text: 'Der er ændringer, som ikke er gemt endnu. Løs lagringsproblemet før import.', kind: 'error' });
     try {
       await api.importReplace(store.getState().baseVersion, importState.json);
       setImportState(null);
-      setSettingsTab(null);
-      await reloadFromServer('Backup importeret. Alle data er erstattet, og fortryd-historikken er nulstillet.');
+      setSettings(null);
+      await reloadFromServer('Backup importeret. Alle data er erstattet.');
     } catch (e) {
       push({ text: `Import mislykkedes: ${(e as Error).message}`, kind: 'error' });
     }
@@ -429,8 +360,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   const restoreRevision = async (version: number) => {
     try {
       const rev = await api.revision(version);
-      const when = new Date(rev.createdAt).toLocaleString('da-DK', { dateStyle: 'medium', timeStyle: 'short' });
-      commit(`Gendan version ${version}`, rev.data, { message: `Version ${version} fra ${when} er gendannet` });
+      commit(`Gendan version ${version}`, rev.data, { message: `Version ${version} er gendannet` });
     } catch (e) {
       push({ text: `Kunne ikke gendanne: ${(e as Error).message}`, kind: 'error' });
     }
@@ -439,23 +369,27 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     await store.flush();
     try {
       await api.loadDemo(store.getState().baseVersion);
-      setSettingsTab(null);
+      setSettings(null);
       await reloadFromServer('Eksempeldata indlæst.');
     } catch (e) {
       push({ text: (e as Error).message, kind: 'error' });
     }
   };
+  const showBlock = (b: Block) => {
+    setSettings(null);
+    setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-block-id="${b.id}"]`);
+      el?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+      el?.focus();
+      flash(b.id);
+    }, 60);
+  };
 
-  // ---- Panel-størrelse ---------------------------------------------------------------
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
-    const startPos = panelPos === 'right' ? e.clientX : e.clientY;
-    const startSize = panelSize;
-    const move = (ev: PointerEvent) => {
-      const delta = (panelPos === 'right' ? ev.clientX : ev.clientY) - startPos;
-      const max = panelPos === 'right' ? window.innerWidth * 0.6 : window.innerHeight * 0.7;
-      setPanelSize(Math.round(Math.max(260, Math.min(max, startSize - delta))));
-    };
+    const x0 = e.clientX;
+    const w0 = hoursWidth;
+    const move = (ev: PointerEvent) => setHoursWidth(Math.round(Math.max(220, Math.min(420, w0 - (ev.clientX - x0)))));
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -464,265 +398,212 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     window.addEventListener('pointerup', up);
   };
 
-  const placingBlock = placement ? data.blocks.find((b) => b.id === placement.blockId) : null;
-  const subjectName = (b: Block) => data.subjects.find((s) => s.id === b.subjectId)?.name ?? '';
-  const groupName = (b: Block) => data.groups.find((g) => g.id === b.groupId)?.name ?? '';
-
-  const panel = (
-    <HoursPanel
+  const hours = (
+    <HoursColumn
       data={data}
       summaries={summaries}
-      selectedId={selectedTeacher}
-      onSelect={setSelectedTeacher}
+      openId={openTeacher}
+      onOpen={setOpenTeacher}
       conflictCount={conflicts.pairs.length}
-      unit={unit}
-      onUnit={setUnit}
-      onOpenSettings={(tab) => setSettingsTab(tab ?? 'teachers')}
-      onShowConflicts={() => setShowConflicts(true)}
-      filteredTeacherId={filter.teacherId}
-      onFilterTeacher={(id) => setFilter((f) => ({ ...f, teacherId: f.teacherId === id ? null : id }))}
+      onShowConflicts={() => setSettings({ section: 'tools', teacherId: null })}
+      onDetails={(id) => setSettings({ section: 'work', teacherId: id })}
     />
   );
+  const draft = placement?.mode === 'create' ? placement.block : null;
+  const panelBlock = panel?.kind === 'block' ? data.blocks.find((b) => b.id === panel.block.id) ?? null : null;
 
   return (
-    <div className={`app app-admin${session.demo ? ' is-demo' : ''}`}>
+    <div className={`app${session.demo ? ' is-demo' : ''}`}>
       <header className="topbar">
         <div className="brand">
-          <span className="logo" aria-hidden="true" />
-          <span className="brand-name">Ugeskema</span>
-          {session.demo && <span className="demo-badge">DEMOTILSTAND</span>}
+          <span className="brand-kicker">Balletskolen</span>
+          <h1 className="brand-title">Ugeskema</h1>
+          {session.demo && <span className="tag">{session.standalone ? 'Prøveversion' : 'Demo'}</span>}
         </div>
-        <div className="tb-group">
-          <button className="btn btn-primary" onClick={() => newBlockAt({ day: isMobile ? mobileDay : 0, daypart: 0, roomId: data.rooms[0].id }, null)} title="Ny blok (N)">
-            <Icon name="plus" size={15} /> <span className="hide-sm">Ny blok</span>
+        <div className="topbar-right">
+          <SaveState status={status} onRetry={() => void store.flush()} />
+          <button className="btn btn-primary" onClick={() => setPanel({ kind: 'add', rect: null, target: null })}>
+            <Icon name="plus" size={18} /> Tilføj ny klasse
           </button>
-          <button className="btn btn-icon" onClick={undo} disabled={!pastLen} title={nextUndo ? `Fortryd: ${nextUndo} (Ctrl/⌘+Z)` : 'Fortryd'} aria-label="Fortryd">
-            <Icon name="undo" />
+          <button className="icon-btn icon-btn-lg gear" onClick={() => setSettings({ section: null, teacherId: null })} aria-label="Indstillinger og øvrige funktioner">
+            <Icon name="gear" size={22} />
           </button>
-          <button className="btn btn-icon" onClick={redo} disabled={!futureLen} title={nextRedo ? `Annuller fortryd: ${nextRedo} (Ctrl/⌘+Shift+Z)` : 'Annuller fortryd'} aria-label="Annuller fortryd">
-            <Icon name="redo" />
-          </button>
-        </div>
-        <FilterBar data={data} filter={filter} onFilter={setFilter} />
-        <div className="tb-spacer" />
-        {conflicts.pairs.length > 0 && (
-          <button className="btn btn-conflict" onClick={() => setShowConflicts(true)}>
-            <Icon name="alert" size={15} /> {conflicts.pairs.length} <span className="hide-sm">{conflicts.pairs.length === 1 ? 'konflikt' : 'konflikter'}</span>
-          </button>
-        )}
-        <SaveIndicator status={status} lastSavedAt={lastSavedAt} onRetry={() => void store.flush()} />
-        <div className="tb-group">
-          {!isMobile && (
-            <>
-              <button className="btn btn-icon" onClick={() => setPanelOpen(!panelOpen)} aria-pressed={panelOpen} title={panelOpen ? 'Skjul timeoverblik' : 'Vis timeoverblik'} aria-label="Vis/skjul timeoverblik">
-                <Icon name={panelPos === 'right' ? 'panelRight' : 'panelBottom'} />
-              </button>
-              {panelOpen && (
-                <button className="btn btn-icon" onClick={() => setPanelPos(panelPos === 'right' ? 'bottom' : 'right')} title={panelPos === 'right' ? 'Placér overblik nederst' : 'Placér overblik til højre'} aria-label="Skift placering af timeoverblik">
-                  <Icon name={panelPos === 'right' ? 'panelBottom' : 'panelRight'} />
-                </button>
-              )}
-            </>
-          )}
-          <button className="btn btn-icon hide-sm" onClick={() => setShowHelp(true)} title="Tastaturgenveje (?)" aria-label="Tastaturgenveje">
-            <Icon name="keyboard" />
-          </button>
-          <button className="btn btn-icon" onClick={() => setSettingsTab('teachers')} title="Indstillinger" aria-label="Indstillinger">
-            <Icon name="gear" />
-          </button>
-          <a
-            className="btn btn-icon hide-sm"
-            href={session.standalone ? '#vis' : '/'}
-            target={session.standalone ? undefined : '_blank'}
-            rel="noreferrer"
-            title="Åbn læsevisning"
-            aria-label="Åbn læsevisning"
-          >
-            <Icon name="eye" />
-          </a>
-          {!session.standalone && (
-            <button className="btn btn-icon" onClick={onLogout} title="Log ud" aria-label="Log ud">
-            <Icon name="logout" />
-          </button>
-          )}
         </div>
       </header>
 
-      {session.standalone && (
-        <div className="banner banner-filter" role="note">
-          <strong>Prøveversion.</strong> Alt virker, men ændringer gemmes kun i denne browser og deles ikke med andre. Du kan nulstille under
-          Indstillinger → Data og backup.
-        </div>
-      )}
-      {status === 'conflict' && (
+      {(status === 'conflict' || status === 'error') && (
         <div className="banner banner-error" role="alert">
-          <strong>Ikke gemt:</strong> {errorMessage} Dine seneste ændringer er bevaret her og i browseren.
+          <span>
+            <strong>{status === 'conflict' ? 'Ikke gemt.' : 'Kunne ikke gemme.'}</strong> {errorMessage}
+          </span>
           <div className="banner-actions">
-            <button className="btn btn-sm" onClick={() => void reloadFromServer('Nyeste version hentet. Dine ikke-gemte ændringer er kasseret.')}>
-              Hent nyeste (kassér mine)
-            </button>
-            <button
-              className="btn btn-sm btn-warn"
-              onClick={async () => {
-                const v = await api.version();
-                await store.overwriteServer(v.version);
-              }}
-            >
-              Gem mine alligevel (overskriv)
-            </button>
-            <button className="btn btn-sm" onClick={downloadLocal}>
-              <Icon name="download" size={13} /> Download mine
-            </button>
-          </div>
-        </div>
-      )}
-      {status === 'error' && (
-        <div className="banner banner-error" role="alert">
-          <strong>Kunne ikke gemme.</strong> {errorMessage}
-          <div className="banner-actions">
-            <button className="btn btn-sm" onClick={() => void store.flush()}>
-              Prøv igen
-            </button>
+            {status === 'conflict' ? (
+              <>
+                <button className="btn btn-sm" onClick={() => void reloadFromServer('Nyeste version hentet. Dine ikke-gemte ændringer er kasseret.')}>
+                  Hent nyeste
+                </button>
+                <button
+                  className="btn btn-sm"
+                  onClick={async () => {
+                    const v = await api.version();
+                    await store.overwriteServer(v.version);
+                  }}
+                >
+                  Gem mine alligevel
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-sm" onClick={() => void store.flush()}>
+                Prøv igen
+              </button>
+            )}
             {errorMessage?.includes('logget ind') && (
               <button className="btn btn-sm btn-primary" onClick={() => setNeedLogin(true)}>
                 Log ind igen
               </button>
             )}
-            <button className="btn btn-sm" onClick={downloadLocal}>
-              <Icon name="download" size={13} /> Download ændringer
-            </button>
           </div>
         </div>
       )}
-      {placingBlock && placement && (
-        <div className={`banner banner-${placement.mode}`} role="status">
-          <Icon name={placement.mode === 'copy' ? 'copy' : 'move'} />
-          <span>
-            <strong>{placement.mode === 'copy' ? 'Kopiér' : 'Flyt'}</strong> {subjectName(placingBlock)} · {groupName(placingBlock)} ({formatRange(placingBlock.start, placingBlock.end)}) —
-            vælg målcelle med klik, eller piletaster + Enter.
-          </span>
-          <button className="btn btn-sm" onClick={() => setPlacement(null)}>
-            Annuller (Esc)
-          </button>
-        </div>
-      )}
-      {filterActive(filter) && !placement && (
-        <div className="banner banner-filter">
-          <Icon name="filter" size={14} /> Filter aktivt – skemaet viser kun matchende blokke. Timeoverblikket omfatter stadig hele grundugen.
-          <button className="btn btn-sm" onClick={() => setFilter(emptyFilter)}>
-            Ryd filter
-          </button>
-        </div>
-      )}
+      {session.standalone && <div className="banner banner-note">Prøveversion: ændringer gemmes kun i denne browser.</div>}
 
-      {isMobile ? (
-        <div className="mobile-body">
-          {mobileTab === 'schedule' ? (
-            <>
-              <DayTabs day={mobileDay} onDay={setMobileDay} counts={[0, 1, 2, 3, 4, 5].map((d) => data.blocks.filter((b) => b.day === d).length)} />
-              <DayList
-                data={data}
-                day={mobileDay}
-                filter={filter}
-                conflictIds={conflicts.blockIds}
-                onOpen={(b, rect) => (placement ? undefined : setEditor({ block: b, isNew: false, anchor: rect }))}
-                onAdd={(dp: DaypartIndex) => newBlockAt({ day: mobileDay, daypart: dp, roomId: data.rooms[0].id }, null)}
-              />
-            </>
-          ) : (
-            <aside className="panel panel-mobile">{panel}</aside>
-          )}
-          <nav className="mobile-nav">
-            <button className={mobileTab === 'schedule' ? 'on' : ''} onClick={() => setMobileTab('schedule')}>
-              <Icon name="grid" /> Skema
-            </button>
-            <button className={mobileTab === 'hours' ? 'on' : ''} onClick={() => setMobileTab('hours')}>
-              <Icon name="clock" /> Timer
-            </button>
-          </nav>
-        </div>
-      ) : (
-        <div
-          className={`workspace panel-${panelPos}${panelOpen ? '' : ' panel-closed'}`}
-          style={{ ['--panel-size' as string]: `${panelSize}px` }}
-        >
-          <DndContext sensors={sensors} collisionDetection={pointerWithin} autoScroll={{ acceleration: 3, threshold: { x: 0.08, y: 0.1 } }} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDrag(null)}>
-            <div className="grid-scroll" tabIndex={-1}>
-              {data.blocks.length === 0 && (
-                <EmptyHint data={data} onSettings={() => setSettingsTab('teachers')} onDemo={() => setSettingsTab('data')} />
-              )}
+      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => (setDrag(null), setOverCell(null))} autoScroll={{ acceleration: 3, threshold: { x: 0.08, y: 0.1 } }}>
+        {isMobile ? (
+          <div className="mobile-body">
+            {mobileTab === 'schedule' ? (
+              <>
+                <DayTabs day={mobileDay} onDay={setMobileDay} />
+                <DayList data={grid} day={mobileDay} conflictIds={conflicts.blockIds} onOpen={(b, rect) => setPanel({ kind: 'block', block: b, rect, editing: false })} onPlace={placement ? (cell) => onCellTap(cell, new DOMRect()) : undefined} />
+              </>
+            ) : (
+              <aside className="hours-pane hours-mobile">{hours}</aside>
+            )}
+            <nav className="mobile-nav">
+              <button className={mobileTab === 'schedule' ? 'on' : ''} onClick={() => setMobileTab('schedule')}>
+                Skema
+              </button>
+              <button className={mobileTab === 'hours' ? 'on' : ''} onClick={() => setMobileTab('hours')}>
+                Timer
+              </button>
+            </nav>
+          </div>
+        ) : (
+          <div className="workspace" style={{ ['--hours-w' as string]: `${hoursWidth}px` }}>
+            <div className="board-scroll">
               <ScheduleGrid
-                data={data}
-                filter={filter}
+                data={grid}
                 editable
                 conflictIds={conflicts.blockIds}
                 placement={placement}
-                drag={drag}
+                previewFor={previewFor}
+                dragging={drag?.block ?? null}
                 flashId={flashId}
-                onCellClick={onCellClick}
-                onBlockOpen={(b, rect) => setEditor({ block: b, isNew: false, anchor: rect })}
-                onBlockMenu={(b, rect) => setMenu({ block: b, rect })}
+                selectedId={panel?.kind === 'block' ? panel.block.id : null}
+                onCellTap={onCellTap}
+                onBlockTap={(b, rect) => setPanel({ kind: 'block', block: b, rect, editing: false })}
                 onBlockKey={onBlockKey}
+                onAssemblyTap={() => setSettings({ section: 'rules', teacherId: null })}
               />
             </div>
-            <DragOverlay dropAnimation={null}>{drag && <BlockPreview block={drag.block} data={data} badge={drag.copy ? 'Kopiér' : 'Flyt'} />}</DragOverlay>
-          </DndContext>
-          {panelOpen && (
-            <>
-              <div className="resizer" onPointerDown={startResize} role="separator" aria-orientation={panelPos === 'right' ? 'vertical' : 'horizontal'} aria-label="Juster panelets størrelse" />
-              <aside className="panel" aria-label="Timeoverblik">
-                {panel}
-              </aside>
-            </>
+            <div className="resizer" onPointerDown={startResize} role="separator" aria-orientation="vertical" aria-label="Justér timekolonnens bredde" />
+            <aside className="hours-pane" aria-label="Timeoptælling">
+              {hours}
+            </aside>
+          </div>
+        )}
+
+        {placement && !pending && (
+          <div className={`place-bar place-bar-${placement.mode}`} role="status">
+            {draft && <DraftCard block={draft} data={grid} />}
+            <span className="place-text">
+              {placement.mode === 'create'
+                ? 'Træk klassen til en celle, eller tryk på cellen.'
+                : `${placement.mode === 'copy' ? 'Kopiér' : 'Flyt'} ${placement.block.title} · ${groupsLabel(placement.block.groupIds, data.groups)} – tryk på en celle.`}
+            </span>
+            <button className="btn btn-quiet" onClick={clearPlacing}>
+              Annuller
+            </button>
+          </div>
+        )}
+        <DragOverlay dropAnimation={null}>
+          {drag && (
+            <BlockPreview
+              block={drag.block}
+              data={grid}
+              badge={drag.copy ? 'Kopi' : undefined}
+              time={(overCell && previewFor(drag.block, overCell)) || (drag.draft ? 'Ny klasse' : undefined)}
+            />
           )}
-        </div>
+        </DragOverlay>
+      </DndContext>
+
+      {panel?.kind === 'block' && panelBlock && (
+        <Anchored anchor={panel.rect} onClose={() => setPanel(null)} label={panel.editing ? 'Redigér klasse' : 'Klasse'} width={400}>
+          {panel.editing ? (
+            <div className="panel">
+              <h2 className="panel-title">Redigér klasse</h2>
+              <ClassForm
+                data={data}
+                initial={panelBlock}
+                placed
+                submitLabel="Gem"
+                onCancel={() => setPanel({ ...panel, editing: false })}
+                onSubmit={(b) => {
+                  if (JSON.stringify(b) === JSON.stringify(panelBlock)) return setPanel(null);
+                  proposeBlock('Redigér klasse', ops.upsertBlock(data, b), b, `Gemt: ${b.title} · ${where(b)}`, () => setPanel(null));
+                }}
+              />
+            </div>
+          ) : (
+            <BlockInfo
+              block={panelBlock}
+              data={data}
+              onEdit={() => setPanel({ ...panel, editing: true })}
+              onMove={() => startPlacement('move', panelBlock)}
+              onCopy={() => startPlacement('copy', panelBlock)}
+              onDelete={() => deleteBlock(panelBlock)}
+            />
+          )}
+        </Anchored>
       )}
 
-      {menu && (
-        <Anchored anchor={menu.rect} onClose={() => setMenu(null)} label="Handlinger for blok" width={220}>
-          <div className="menu" role="menu">
-            <button role="menuitem" onClick={() => (setEditor({ block: menu.block, isNew: false, anchor: menu.rect }), setMenu(null))}>
-              Rediger <kbd>Enter</kbd>
-            </button>
-            <button role="menuitem" onClick={() => startPlacement('move', menu.block)}>
-              <Icon name="move" size={14} /> Flyt… <kbd>M</kbd>
-            </button>
-            <button role="menuitem" onClick={() => startPlacement('copy', menu.block)}>
-              <Icon name="copy" size={14} /> Kopiér… <kbd>K</kbd>
-            </button>
-            <button role="menuitem" className="danger" onClick={() => deleteBlock(menu.block)}>
-              <Icon name="trash" size={14} /> Slet <kbd>Del</kbd>
-            </button>
+      {panel?.kind === 'add' && (
+        <Anchored anchor={panel.rect} onClose={() => setPanel(null)} label="Tilføj ny klasse" width={420}>
+          <div className="panel">
+            <h2 className="panel-title">Tilføj ny klasse</h2>
+            {panel.target && (
+              <p className="hint">
+                {DAY_NAMES[panel.target.day]} {PERIOD_NAMES[panel.target.period].toLowerCase()} · {roomName(panel.target.roomId)}
+              </p>
+            )}
+            <ClassForm
+              data={data}
+              initial={newDraft(panel.target)}
+              placed={false}
+              submitLabel={panel.target ? 'Opret' : 'Opret og placér'}
+              onCancel={() => setPanel(null)}
+              onSubmit={(b) => {
+                const target = panel.target;
+                setPanel(null);
+                if (target) attemptPlace('create', b, target, panel.rect);
+                else setPlacement({ mode: 'create', block: b });
+              }}
+            />
           </div>
         </Anchored>
       )}
 
-      {editor && (
-        <BlockEditor
-          key={editor.block.id}
-          data={data}
-          initial={editor.block}
-          isNew={editor.isNew}
-          anchor={editor.anchor}
-          onSave={saveFromEditor}
-          onClose={() => setEditor(null)}
-          onDelete={() => deleteBlock(editor.block)}
-          onMove={() => (isMobile ? push({ text: 'Skift dag, sal og tid direkte i redigeringen for at flytte blokken.' }) : startPlacement('move', editor.block))}
-          onCopy={() => {
-            if (!isMobile) return startPlacement('copy', editor.block);
-            const b = editor.block;
-            setEditor(null);
-            placeAt('copy', b, { day: b.day, daypart: daypartOf(b.start, starts), roomId: b.roomId }, null);
-          }}
-          onSplit={(at) => {
-            const r = ops.splitBlock(data, editor.block.id, at);
-            if (r && !commit('Del blok', r.data, { flashId: r.second.id, message: 'Blokken er delt i to sammenhængende blokke' })) setEditor(null);
-          }}
-          onOpenSettings={() => (setEditor(null), setSettingsTab('teachers'))}
-        />
+      {pending && (
+        <Anchored anchor={pending.rect} onClose={() => setPending(null)} label={pending.kind === 'choice' ? 'Vælg tidsrum' : 'Ingen tidsregel'} width={360}>
+          <PendingPanel
+            pending={pending}
+            data={data}
+            onPick={(rule) => finalize(pending.mode, pending.source, ops.withRule(pending.base, rule))}
+            onCustom={(start, end) => finalize(pending.mode, pending.source, { ...pending.base, timeMode: 'custom', ruleId: null, start, end })}
+            onCancel={() => setPending(null)}
+          />
+        </Anchored>
       )}
-
-      {timeReq && <TimePicker req={timeReq} starts={starts} onCancel={() => setTimeReq(null)} onConfirm={(start) => finishPlace(timeReq.mode, timeReq.block, timeReq.day, timeReq.roomId, start)} />}
 
       {prompt && (
         <ConflictDialog
@@ -738,43 +619,31 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
         />
       )}
 
-      {settingsTab && (
+      {settings && (
         <Settings
           data={data}
-          tab={settingsTab}
-          onTab={setSettingsTab}
-          onClose={() => setSettingsTab(null)}
+          section={settings.section}
+          onSection={(section) => setSettings({ section, teacherId: null })}
+          detailTeacherId={settings.teacherId}
+          onClose={() => setSettings(null)}
           onCommit={(label, next) => commit(label, next, { quiet: true })}
+          onRules={onRules}
+          onLoadSourceWeek={loadSourceWeek}
+          onReloadSourceRules={reloadSourceRules}
+          undo={{ onUndo: undo, onRedo: redo, undoLabel: nextUndo, redoLabel: nextRedo }}
+          onShowBlock={showBlock}
           onImportFile={(f) => void onImportFile(f)}
           onLoadDemo={() => void loadDemo()}
-          demoMode={session.demo}
-          undo={{ onUndo: undo, onRedo: redo, undoLabel: nextUndo, redoLabel: nextRedo }}
-          currentVersion={baseVersion}
           onRestoreRevision={(v) => void restoreRevision(v)}
+          onLogout={onLogout}
+          onShowHelp={() => setShowHelp(true)}
+          currentVersion={baseVersion}
+          demoMode={session.demo}
         />
       )}
 
       {importState && <ImportDialog state={importState} onCancel={() => setImportState(null)} onConfirm={() => void confirmImport()} />}
-
-      {showConflicts && (
-        <ConflictOverview
-          data={data}
-          onClose={() => setShowConflicts(false)}
-          onShow={(b) => {
-            setShowConflicts(false);
-            setFilter(emptyFilter);
-            setTimeout(() => {
-              const el = document.querySelector<HTMLElement>(`[data-block-id="${b.id}"]`);
-              el?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
-              el?.focus();
-              flash(b.id);
-            }, 50);
-          }}
-        />
-      )}
-
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
-
       {needLogin && (
         <Modal title="Log ind igen" onClose={() => setNeedLogin(false)}>
           <LoginForm
@@ -785,79 +654,199 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
           />
         </Modal>
       )}
-
       <Toasts toasts={toasts} dismiss={dismiss} />
     </div>
   );
 }
 
-function SaveIndicator({ status, lastSavedAt, onRetry }: { status: string; lastSavedAt: number | null; onRetry: () => void }) {
-  const time = lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }) : null;
-  if (status === 'saved')
-    return (
-      <span className="save save-ok" role="status" title={time ? `Senest gemt kl. ${time}` : 'Alle ændringer er gemt på serveren'}>
-        <Icon name="check" size={14} /> Gemt
-      </span>
-    );
-  if (status === 'pending' || status === 'saving')
-    return (
-      <span className="save save-busy" role="status">
-        <Icon name="loader" size={14} className="spin" /> Gemmer…
-      </span>
-    );
+function SaveState({ status, onRetry }: { status: string; onRetry: () => void }) {
+  if (status === 'saved') return <span className="save save-ok">Gemt</span>;
+  if (status === 'pending' || status === 'saving') return <span className="save">Gemmer…</span>;
   return (
-    <button className="save save-err" onClick={onRetry} role="status">
-      <Icon name="cloudOff" size={14} /> {status === 'conflict' ? 'Ikke gemt' : 'Kunne ikke gemme'}
+    <button className="save save-err" onClick={onRetry}>
+      <Icon name="cloudOff" size={16} /> {status === 'conflict' ? 'Ikke gemt' : 'Kunne ikke gemme'}
     </button>
   );
 }
 
-function EmptyHint({ data, onSettings, onDemo }: { data: AppData; onSettings: () => void; onDemo: () => void }) {
-  const missing = !data.teachers.length || !data.subjects.length || !data.groups.length;
+function DraftCard({ block, data }: { block: Block; data: GridData }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: 'draft' });
   return (
-    <div className="empty-hint">
-      <strong>Skemaet er tomt.</strong>{' '}
-      {missing ? (
-        <>
-          Start med at oprette lærere, fag og hold under{' '}
-          <button className="link" onClick={onSettings}>
-            Indstillinger
+    <div ref={setNodeRef} {...attributes} {...listeners} className={`draft${isDragging ? ' draft-dragging' : ''}`} aria-label={`Ny klasse ${block.title}, træk til en celle`}>
+      <BlockPreview block={block} data={data} time={block.timeMode === 'custom' ? undefined : 'Ny klasse'} />
+    </div>
+  );
+}
+
+function BlockInfo({ block, data, onEdit, onMove, onCopy, onDelete }: { block: Block; data: AppData; onEdit: () => void; onMove: () => void; onCopy: () => void; onDelete: () => void }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const teachers = block.teacherIds.map((id) => data.teachers.find((t) => t.id === id));
+  const rule = block.ruleId ? data.timeRules.find((r) => r.id === block.ruleId) : null;
+  return (
+    <div className="panel">
+      <h2 className="panel-title">{block.title}</h2>
+      <dl className="info">
+        <div>
+          <dt>Tid</dt>
+          <dd>
+            <strong className="tabular">{formatRange(block.start, block.end)}</strong> · {formatDuration(block.end - block.start)}
+          </dd>
+        </div>
+        <div>
+          <dt>Placering</dt>
+          <dd>
+            {DAY_NAMES[block.day]} {PERIOD_NAMES[block.period].toLowerCase()} · {data.rooms.find((r) => r.id === block.roomId)?.name}
+          </dd>
+        </div>
+        <div>
+          <dt>Hold</dt>
+          <dd>{groupsLabel(block.groupIds, data.groups)}</dd>
+        </div>
+        <div>
+          <dt>Lærer{teachers.length > 1 ? 'e' : ''}</dt>
+          <dd className="chips">
+            {teachers.map((t, i) => (
+              <span key={i} className="chip-with-name">
+                <TeacherChip teacher={t} />
+                {t?.name}
+              </span>
+            ))}
+          </dd>
+        </div>
+        <div>
+          <dt>Tidsmodel</dt>
+          <dd>
+            {block.timeMode === 'custom' ? (
+              <>
+                <Icon name="lock" size={14} /> Egne tider – følger klassen ved flytning
+              </>
+            ) : rule ? (
+              `Fra tidstabellen${rule.label ? ` (${rule.label})` : ''} · ${rule.source || 'manuel'}`
+            ) : (
+              'Fælles tid for holdene'
+            )}
+          </dd>
+        </div>
+        {block.note && (
+          <div>
+            <dt>Note</dt>
+            <dd>{block.note}</dd>
+          </div>
+        )}
+      </dl>
+      {confirmDelete ? (
+        <div className="confirm">
+          <p>Slet klassen? Det kan fortrydes.</p>
+          <div className="form-actions">
+            <button className="btn btn-quiet" onClick={() => setConfirmDelete(false)}>
+              Annuller
+            </button>
+            <button className="btn btn-danger" onClick={onDelete} data-autofocus>
+              Slet
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="action-row">
+          <button className="btn" onClick={onEdit} data-autofocus>
+            <Icon name="edit" size={16} /> Redigér
           </button>
-          . Klik derefter i en celle for at oprette en blok.
+          <button className="btn" onClick={onMove}>
+            <Icon name="move" size={16} /> Flyt
+          </button>
+          <button className="btn" onClick={onCopy}>
+            <Icon name="copy" size={16} /> Kopiér
+          </button>
+          <button className="btn btn-quiet btn-danger-text" onClick={() => setConfirmDelete(true)}>
+            <Icon name="trash" size={16} /> Slet
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PendingPanel({ pending, data, onPick, onCustom, onCancel }: { pending: Pending; data: AppData; onPick: (r: TimeRule) => void; onCustom: (s: number, e: number) => void; onCancel: () => void }) {
+  const [custom, setCustom] = useState(false);
+  const [startText, setStartText] = useState('');
+  const [endText, setEndText] = useState('');
+  const s = parseClock(startText);
+  const e = parseClock(endText);
+  const b = pending.base;
+  const where = `${groupsLabel(b.groupIds, data.groups)} ${DAY_NAMES[b.day].toLowerCase()} ${PERIOD_NAMES[b.period].toLowerCase()}`;
+  return (
+    <div className="panel">
+      {pending.kind === 'choice' ? (
+        <>
+          <h2 className="panel-title">Vælg tidsrum</h2>
+          <p className="hint">Tidstabellen har flere tidsrum for {where}.</p>
+          <div className="choice-list">
+            {pending.options.map((o) => (
+              <button key={o.id} className="choice choice-btn" onClick={() => onPick(o)}>
+                <strong className="tabular">{formatRange(o.start, o.end)}</strong>
+                {o.label && <span>{o.label}</span>}
+              </button>
+            ))}
+          </div>
         </>
       ) : (
-        <>Klik i en celle eller på "Ny blok" for at oprette den første undervisning.</>
-      )}{' '}
-      {!data.blocks.length && !data.teachers.length && (
         <>
-          Du kan også{' '}
-          <button className="link" onClick={onDemo}>
-            indlæse eksempeldata
-          </button>
-          .
+          <h2 className="panel-title">Ingen tidsregel</h2>
+          <p>Der er ingen tid i tidstabellen for {where}.</p>
+          {custom ? (
+            <>
+              <div className="field-row">
+                <label className="field field-time">
+                  <span>Start</span>
+                  <input autoFocus inputMode="numeric" value={startText} placeholder={pending.source.timeMode === 'custom' ? formatClock(pending.source.start) : '9.10'} onChange={(ev) => setStartText(ev.target.value)} />
+                </label>
+                <label className="field field-time">
+                  <span>Slut</span>
+                  <input inputMode="numeric" value={endText} placeholder="9.55" onChange={(ev) => setEndText(ev.target.value)} />
+                </label>
+              </div>
+              {s !== null && e !== null && e <= s && <p className="error-text">Sluttid skal ligge efter starttid.</p>}
+            </>
+          ) : (
+            <p className="hint">Du kan give klassen egne tider eller vælge en anden celle.</p>
+          )}
         </>
       )}
+      <div className="form-actions">
+        <button className="btn btn-quiet" onClick={onCancel}>
+          Annuller
+        </button>
+        {pending.kind === 'none' &&
+          (custom ? (
+            <button className="btn btn-primary" disabled={s === null || e === null || e <= s} onClick={() => onCustom(s!, e!)}>
+              Placér med egne tider
+            </button>
+          ) : (
+            <button className="btn btn-primary" onClick={() => setCustom(true)}>
+              Brug egne tider
+            </button>
+          ))}
+      </div>
     </div>
   );
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
   const rows: [string, string][] = [
-    ['N', 'Ny blok'],
+    ['N', 'Tilføj ny klasse'],
     ['Ctrl/⌘ + Z', 'Fortryd'],
-    ['Ctrl/⌘ + Shift + Z  ·  Ctrl + Y', 'Annuller fortryd'],
-    ['Tab', 'Gå mellem blokke'],
-    ['Enter', 'Rediger valgt blok'],
-    ['M', 'Flyt valgt blok (vælg målcelle)'],
-    ['K', 'Kopiér valgt blok (vælg målcelle)'],
-    ['Delete', 'Slet valgt blok (kan fortrydes)'],
-    ['Piletaster + Enter', 'Vælg målcelle ved flyt/kopiér'],
+    ['Ctrl/⌘ + Shift + Z · Ctrl + Y', 'Gentag'],
+    ['Tab', 'Gå mellem klasser'],
+    ['Enter', 'Åbn den valgte klasse'],
+    ['M / K', 'Flyt / kopiér den valgte klasse'],
+    ['Delete', 'Slet den valgte klasse'],
+    ['Piletaster + Enter', 'Vælg celle ved placering'],
     ['Alt under træk', 'Kopiér i stedet for at flytte'],
-    ['Esc', 'Annuller / luk'],
+    ['Esc', 'Annuller eller luk'],
   ];
   return (
     <Modal title="Tastaturgenveje" onClose={onClose}>
-      <table className="help-table">
+      <table className="table">
         <tbody>
           {rows.map(([k, v]) => (
             <tr key={k}>
@@ -869,12 +858,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
           ))}
         </tbody>
       </table>
-      <p className="muted small">
-        Træk en blok med mus, eller hold fingeren på den et øjeblik på en touchskærm. Samme dagdel bevarer klokkeslættet; en anden dagdel åbner en
-        tidsvælger. Alt kan også gøres via ⋯-knappen på blokken.
-      </p>
-      <p className="muted small">Dagdele: {DAYPARTS.join(', ')}.</p>
+      <p className="hint">På en iPad: hold fingeren på en klasse et øjeblik, og træk den derefter.</p>
     </Modal>
   );
 }
-

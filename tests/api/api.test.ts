@@ -89,7 +89,7 @@ describe('API', () => {
     expect(res.status).toBe(400);
     expect((await res.json()).errors.join()).toMatch(/Sluttid/);
     const dup = demoAppData();
-    dup.blocks[0].teacherIds = ['t-th', 't-th'];
+    dup.blocks[0].teacherIds = [dup.blocks[0].teacherIds[0], dup.blocks[0].teacherIds[0]];
     expect((await fetch(`${base}/api/data`, json(cookie, { baseVersion: 1, data: dup }))).status).toBe(400);
   });
 
@@ -200,6 +200,43 @@ describe('API', () => {
     expect(await store.backupTo(path.join(dir, 'backups'), 2)).toBeNull(); // kun én pr. dag
     expect(store.integrityCheck()).toBe('ok');
     store.close();
+  });
+
+  it('migrerer gamle data ved opstart uden at slette noget', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ugeskema-mig-'));
+    const file = path.join(dir, 'db.sqlite');
+    const Database = (await import('better-sqlite3')).default;
+    const raw = new Database(file);
+    raw.exec('CREATE TABLE app_state (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE revisions (version INTEGER PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL, source TEXT NOT NULL); CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
+    const v1 = {
+      schemaVersion: 1,
+      teachers: [{ id: 't1', initials: 'TH', name: '', color: '#f9c6c9', annualHours: 1600, archived: false }],
+      subjects: [{ id: 's1', name: 'Klassisk ballet', archived: false }],
+      groups: [{ id: 'g6', name: 'Hold 6', archived: false }],
+      rooms: [...Array.from({ length: 7 }, (_, i) => ({ id: `room-${i + 1}`, name: `Sal ${i + 1}` })), { id: 'room-gym', name: 'Motionsrum' }],
+      blocks: [{ id: 'b1', subjectId: 's1', groupId: 'g6', teacherIds: ['t1'], day: 0, roomId: 'room-1', start: 490, end: 595, note: '' }],
+      settings: { prepPercent: 25, saturdayPercent: 50, prepBasis: 'actual', teachingWeeks: 36, daypartStarts: [600, 780, 1080] },
+    };
+    raw.prepare('INSERT INTO app_state VALUES (1, 7, ?, ?)').run(JSON.stringify(v1), new Date().toISOString());
+    raw.prepare('INSERT INTO revisions VALUES (7, ?, ?, ?)').run(JSON.stringify(v1), new Date().toISOString(), 'edit');
+    raw.close();
+    const { base } = await start({}, file);
+    const { cookie } = await login(base);
+    const s = await (await fetch(`${base}/api/data`, { headers: { cookie } })).json();
+    expect(s.version).toBe(8);
+    expect(s.data.schemaVersion).toBe(2);
+    expect(s.data.blocks[0]).toMatchObject({ id: 'b1', title: 'Klassisk ballet', groupIds: ['g6'], timeMode: 'rule' });
+    expect(s.data.timeRules.length).toBeGreaterThan(50);
+    const revs = await (await fetch(`${base}/api/revisions`, { headers: { cookie } })).json();
+    expect(revs.map((r: { source: string }) => r.source).slice(0, 2)).toEqual(['migration', 'edit']);
+  });
+
+  it('import af en gammel backup migreres før validering', async () => {
+    const { base } = await start();
+    const { cookie } = await login(base);
+    const old = { schemaVersion: 1, teachers: [], subjects: [], groups: [], rooms: [...Array.from({ length: 7 }, (_, i) => ({ id: `room-${i + 1}`, name: `Sal ${i + 1}` })), { id: 'room-gym', name: 'Motionsrum' }], blocks: [], settings: { prepPercent: null, saturdayPercent: null, prepBasis: 'actual', teachingWeeks: null, daypartStarts: [600, 780, 1080] } };
+    const preview = await (await fetch(`${base}/api/import/preview`, json(cookie, old, 'POST'))).json();
+    expect(preview.ok).toBe(true);
   });
 
   it('demotilstand bruger sin egen databasefil', () => {

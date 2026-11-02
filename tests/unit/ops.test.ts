@@ -1,32 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { copyOf, splitBlock, upsertBlock } from '../../client/src/ops';
-import { computeTeacherSummary } from '../../shared/calc';
+import { copyOf, placeBlock, upsertBlock } from '../../client/src/ops';
 import { demoAppData } from '../../shared/demo';
 
-describe('blokoperationer', () => {
-  it('kopi har nyt id og kan ændres uafhængigt af originalen', () => {
+describe('kopiering', () => {
+  it('kopi har nyt id, bevarer egne tider og kan ændres uafhængigt', () => {
     const d = demoAppData();
-    const orig = d.blocks[0];
-    const copy = copyOf(orig, { day: 2 });
+    const orig = { ...d.blocks[0], timeMode: 'custom' as const, ruleId: null, start: 500, end: 560 };
+    const copy = copyOf(orig);
     expect(copy.id).not.toBe(orig.id);
-    copy.teacherIds.push('t-co');
-    expect(orig.teacherIds).toEqual(['t-th']);
-    const next = upsertBlock(d, copy);
-    expect(next.blocks).toHaveLength(d.blocks.length + 1);
-    expect(next.blocks.find((b) => b.id === orig.id)).toEqual(orig);
-  });
-
-  it('del blok giver to sammenhængende blokke med samme samlede tid', () => {
-    const d = demoAppData();
-    const b = d.blocks.find((x) => x.teacherIds.length === 2)!;
-    const before = computeTeacherSummary(d, b.teacherIds[0]).week.U;
-    const r = splitBlock(d, b.id, b.start + 30)!;
-    const parts = r.data.blocks.filter((x) => x.id === b.id || x.id === r.second.id);
-    expect(parts.map((x) => [x.start, x.end])).toEqual([
-      [b.start, b.start + 30],
-      [b.start + 30, b.end],
-    ]);
-    expect(computeTeacherSummary(r.data, b.teacherIds[0]).week.U).toBe(before);
-    expect(splitBlock(d, b.id, b.start)).toBeNull();
+    copy.teacherIds.push('x');
+    expect(orig.teacherIds).toHaveLength(1);
+    const placed = placeBlock({ ...d, blocks: [orig] }, copyOf(orig), { day: 5, period: 3, roomId: d.rooms[2].id });
+    expect(placed).toMatchObject({ kind: 'ok', block: { start: 500, end: 560, timeMode: 'custom' } });
+    expect(upsertBlock(d, copy).blocks).toHaveLength(d.blocks.length + 1);
   });
 });

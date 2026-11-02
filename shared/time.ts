@@ -1,8 +1,5 @@
 // Klokkeslæt, dagdele og tidsformatering. Tider er hele minutter efter midnat.
 
-export const DAYPARTS = ['Morgen', 'Formiddag', 'Eftermiddag', 'Aften'] as const;
-export type DaypartIndex = 0 | 1 | 2 | 3;
-
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** 590 → "09.50" (dansk notation med punktum). 1440 → "24.00". */
@@ -44,88 +41,17 @@ export function parseClock(input: string): number | null {
   return h * 60 + m;
 }
 
-/** Dagdel for en starttid ud fra de tre starttidspunkter for formiddag/eftermiddag/aften. */
-export function daypartOf(start: number, starts: readonly [number, number, number]): DaypartIndex {
-  if (start >= starts[2]) return 3;
-  if (start >= starts[1]) return 2;
-  if (start >= starts[0]) return 1;
-  return 0;
-}
-
-/** Tidsinterval for en dagdel [fra, til). */
-export function daypartRange(
-  daypart: DaypartIndex,
-  starts: readonly [number, number, number],
-): { from: number; to: number } {
-  const bounds = [0, starts[0], starts[1], starts[2], 1440];
-  return { from: bounds[daypart], to: bounds[daypart + 1] };
-}
-
-/** Kort beskrivelse af en dagdel, fx "før 10.00" eller "13.00–18.00". */
-export function daypartLabel(daypart: DaypartIndex, starts: readonly [number, number, number]): string {
-  const { from, to } = daypartRange(daypart, starts);
-  if (daypart === 0) return `før ${formatClock(to)}`;
-  if (daypart === 3) return `fra ${formatClock(from)}`;
-  return `${formatClock(from)}–${formatClock(to)}`;
-}
-
-/** Standardforslag til starttid for en ny blok i en dagdel uden andre blokke. */
-export function defaultStartForDaypart(daypart: DaypartIndex, starts: readonly [number, number, number]): number {
-  if (daypart === 0) return Math.max(0, Math.min(480, starts[0] - 60)); // 08.00
-  return daypartRange(daypart, starts).from;
-}
-
 /**
- * Forslag til starttid i en målcelle: efter sidste eksisterende blok i dagdelen, hvis den
- * stadig starter i dagdelen; ellers dagdelens standardstart. Varigheden skal kunne nås inden midnat.
+ * Kun til migrering af gamle data og forslag til egne tider: dagdel ud fra et klokkeslæt.
+ * Grænserne er valgt efter skemadokumentets struktur (morgen slutter senest 9.55, formiddag
+ * slutter senest 12.00, middag ligger 11.50–15.00, eftermiddag fra 16.10). Ny undervisning får
+ * altid sin dagdel fra cellen, den placeres i.
  */
-export function suggestStart(
-  daypart: DaypartIndex,
-  starts: readonly [number, number, number],
-  duration: number,
-  existingEnds: number[],
-): number {
-  const { from, to } = daypartRange(daypart, starts);
-  let start = defaultStartForDaypart(daypart, starts);
-  const lastEnd = existingEnds.length ? Math.max(...existingEnds) : null;
-  if (lastEnd !== null && lastEnd >= from && lastEnd < to) start = Math.max(start, lastEnd);
-  return Math.max(0, Math.min(start, 1440 - duration));
-}
-
-export interface Interval {
-  start: number;
-  end: number;
-}
-
-/**
- * Finder en ledig starttid for en blok med given varighed, så den ikke overlapper de
- * optagede intervaller (fx samme sal, hold eller lærer samme dag). Prioritet:
- * 1) første ledige tid fra `preferred` inden for `range`, 2) seneste ledige tid før
- * `preferred` inden for `range` (kun hvis `stayInRange`), 3) første ledige tid efter `preferred`.
- */
-export function findFreeStart(opts: {
-  preferred: number;
-  duration: number;
-  busy: Interval[];
-  range: { from: number; to: number };
-  stayInRange?: boolean;
-}): number {
-  const { preferred, duration, busy, range } = opts;
-  const fits = (c: number) => c >= 0 && c + duration <= 1440;
-  const free = (c: number) => !busy.some((b) => c < b.end && b.start < c + duration);
-  const inRange = (c: number) => c >= range.from && c < range.to;
-  const cands = [...new Set([preferred, ...busy.map((b) => b.end), ...busy.map((b) => b.start - duration)])]
-    .filter(fits)
-    .sort((a, b) => a - b);
-  const after = cands.filter((c) => c >= preferred && free(c));
-  const inside = after.find(inRange);
-  if (inside !== undefined) return inside;
-  if (opts.stayInRange) {
-    const before = cands.filter((c) => c < preferred && free(c) && inRange(c));
-    if (before.length) return before[before.length - 1];
-  }
-  if (after.length) return after[0];
-  return Math.max(0, Math.min(preferred, 1440 - duration));
+export function periodForClock(start: number): 0 | 1 | 2 | 3 {
+  if (start < 600) return 0;
+  if (start < 690) return 1;
+  if (start < 960) return 2;
+  return 3;
 }
 
 // ---- Varigheder ----------------------------------------------------------

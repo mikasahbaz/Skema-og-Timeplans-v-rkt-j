@@ -43,10 +43,7 @@ export function LoginPage({ title, subtitle, onSuccess, viewerHint }: { title: s
   return (
     <div className="login-page">
       <div className="login-card">
-        <div className="brand brand-lg">
-          <span className="logo" aria-hidden="true" />
-          <span className="brand-name">Ugeskema</span>
-        </div>
+        <span className="brand-kicker">Balletskolen · Ugeskema</span>
         <h1>{title}</h1>
         <p className="muted">{subtitle}</p>
         <LoginForm onSuccess={onSuccess} viewerHint={viewerHint} />

@@ -20,6 +20,7 @@
     "build:standalone": "VITE_STANDALONE=1 vite build && node scripts/build-standalone.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
     "better-sqlite3": "^13.0.3",
     "express": "^5.3.0",
     "zod": "^4.6.7"

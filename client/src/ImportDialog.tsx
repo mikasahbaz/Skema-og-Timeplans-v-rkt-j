@@ -7,7 +7,7 @@ export interface ImportState {
   preview: { ok: boolean; errors: string[]; incoming: Counts | null; current: Counts; currentVersion: number };
 }
 
-const line = (c: Counts) => `${c.blocks} blokke, ${c.teachers} lærere, ${c.subjects} fag og ${c.groups} hold`;
+const line = (c: Counts) => `${c.blocks} klasser, ${c.teachers} lærere, ${c.groups} hold og ${c.rules} tidsregler`;
 
 export function ImportDialog({ state, onCancel, onConfirm }: { state: ImportState; onCancel: () => void; onConfirm: () => void }) {
   const { preview } = state;

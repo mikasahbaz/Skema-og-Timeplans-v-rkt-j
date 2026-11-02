@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { demoAppData } from '../shared/demo.js';
+import { migrateAny } from '../shared/migrate.js';
 import { publicProjection } from '../shared/public.js';
 import type { AppData } from '../shared/schema.js';
 import { validateAppData } from '../shared/validate.js';
@@ -26,7 +27,7 @@ function summarize(data: AppData) {
   return {
     blocks: data.blocks.length,
     teachers: data.teachers.length,
-    subjects: data.subjects.length,
+    rules: data.timeRules.length,
     groups: data.groups.length,
   };
 }
@@ -41,6 +42,8 @@ function unwrapBackup(body: unknown): unknown {
 
 export function createApp(config: Config, store?: Store) {
   const db = store ?? new Store(config.dbFile, config.demoMode ? demoAppData : undefined);
+  const migration = db.migrate();
+  if (migration) console.log(`[ugeskema] Data migreret fra version ${migration.from}: ${migration.matched} klasser knyttet til tidsregler, ${migration.custom} beholder egne tider.`);
   const sessions = new Sessions(
     config.sessionSecret ?? db.sessionSecret(),
     { admin: config.adminPassword, viewer: config.viewerPassword },
@@ -61,7 +64,7 @@ export function createApp(config: Config, store?: Store) {
     res.setHeader(
       'Content-Security-Policy',
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
-        "font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+        "font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
     );
     if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     next();
@@ -156,7 +159,7 @@ export function createApp(config: Config, store?: Store) {
   });
 
   app.post('/api/import/preview', requireAdmin, (req, res) => {
-    const result = validateAppData(unwrapBackup(req.body));
+    const result = validateAppData(migrateAny(unwrapBackup(req.body)).data);
     const current = db.get();
     res.json({
       ok: result.ok,
@@ -170,7 +173,7 @@ export function createApp(config: Config, store?: Store) {
   app.post('/api/import', requireAdmin, (req, res) => {
     const { baseVersion, backup } = req.body ?? {};
     if (!Number.isInteger(baseVersion)) return res.status(400).json({ error: 'baseVersion mangler', errors: [] });
-    const result = validateAppData(unwrapBackup(backup));
+    const result = validateAppData(migrateAny(unwrapBackup(backup)).data);
     if (!result.ok) return res.status(400).json({ error: 'Filen er ikke en gyldig backup', errors: result.errors });
     const saved = db.save(baseVersion, result.data!, 'import');
     if (!saved.ok) return res.status(409).json({ error: 'Skemaet er ændret et andet sted', currentVersion: saved.currentVersion });
@@ -181,7 +184,8 @@ export function createApp(config: Config, store?: Store) {
   app.post('/api/demo', requireAdmin, (req, res) => {
     const current = db.get();
     const d = current.data;
-    const empty = d.blocks.length === 0 && d.teachers.length === 0 && d.subjects.length === 0 && d.groups.length === 0;
+    // Tomt = ingen klasser og ingen lærere (tidstabel og hold fra kilden må gerne findes).
+    const empty = d.blocks.length === 0 && d.teachers.length === 0;
     if (!config.demoMode && !empty) {
       return res.status(409).json({ error: 'Eksempeldata kan kun indlæses i et tomt skema eller i demotilstand.' });
     }

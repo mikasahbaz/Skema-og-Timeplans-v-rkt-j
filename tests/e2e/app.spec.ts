@@ -1,379 +1,314 @@
-import { expect, test } from '@playwright/test';
-import { blk, cell, dragPoints, fixture, loginAdmin, mouseDrag, resetData, teacherRow, VIEWER_PW, waitSaved } from './helpers';
+import { expect, test, type Page } from '@playwright/test';
+import { blockEl, cell, dragTo, fixture, g, loginAdmin, moveVia, resetData, ruleBlock, teacherDetail, teacherRow, VIEWER_PW, waitSaved } from './helpers';
 
-const A = blk({ id: 'A', day: 0, start: 540, end: 660, teacherIds: ['th'] }); // Mandag 09–11, TH
-const B = blk({ id: 'B', day: 5, start: 540, end: 660, teacherIds: ['th', 'co'], groupId: 'h4' }); // Lørdag 09–11, TH + CO
+const H8 = g('Hold 8');
+const H9 = g('Hold 9');
+const H6 = g('Hold 6');
 
-const block = (page: import('@playwright/test').Page, id: string) => page.locator(`[data-block-id="${id}"]`);
+/** Den eneste klasse i skemaet, uanset id. */
+const only = (page: Page) => page.locator('.board .block').first();
 
-test('eksempel A–D vises korrekt i timeoverblikket og fortryd gendanner summerne', async ({ page, request }) => {
-  await resetData(request, fixture([A, B]));
+test('1) hovedskærmen har kun skema, optælling, "Tilføj ny klasse" og tandhjul', async ({ page, request }) => {
+  await resetData(request, fixture([ruleBlock(fixture(), { groupIds: [H8], day: 0, period: 0 })]));
   await loginAdmin(page);
-  const th = teacherRow(page, 'TH');
-  await expect(th).toContainText('4 t'); // U
-  await expect(th).toContainText('6 t'); // K
-  await expect(th).toContainText('1.384 t'); // rest
-  const co = teacherRow(page, 'CO');
-  await expect(co).toContainText('3 t 30 min');
-  await expect(co).toContainText('mangler'); // CO har ingen årsarbejdstimer
-  await expect(page.locator('.totals-line')).toContainText('4 t undervisning i salene');
-  await expect(page.locator('.totals-line')).toContainText('6 t lærertimer');
-
-  await th.click();
-  const week = page.locator('.week-box');
-  await expect(week.locator('.stat', { hasText: 'Forberedelsestid' })).toContainText('1 t');
-  await expect(week.locator('.stat', { hasText: 'Lørdagstillæg' })).toContainText('1 t');
-  await expect(page.locator('.year-box .stat', { hasText: 'Planlagt' })).toContainText('216 t');
-
-  // Eksempel D: grundlag inkl. lørdagstillæg → lørdagsblok 3 t 45 min pr. lærer
-  await page.getByRole('button', { name: 'Ret satser' }).click();
-  await page.getByText('Undervisning inkl. lørdagstillæg').click();
-  await page.getByRole('button', { name: 'Luk' }).first().click();
-  await expect(teacherRow(page, 'CO')).toContainText('3 t 45 min');
-  await expect(teacherRow(page, 'TH')).toContainText('6 t 15 min');
-
-  await page.keyboard.press('Control+z');
-  await expect(teacherRow(page, 'CO')).toContainText('3 t 30 min');
-  await expect(teacherRow(page, 'TH')).toContainText('6 t');
-  await waitSaved(page);
+  await expect(page.locator('.board')).toBeVisible();
+  await expect(page.locator('.hours')).toBeVisible();
+  const topButtons = page.locator('.topbar button');
+  await expect(topButtons).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Tilføj ny klasse' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Indstillinger og øvrige funktioner' })).toBeVisible();
+  // Ingen filtre, fortryd-knapper eller permanente handlingsknapper på klasserne.
+  await expect(page.locator('select')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Fortryd' })).toHaveCount(0);
+  await expect(page.locator('.block button')).toHaveCount(0);
+  // Trykflader til hovedfunktionerne er mindst 44 px.
+  for (const name of ['Tilføj ny klasse', 'Indstillinger og øvrige funktioner']) {
+    const box = (await page.getByRole('button', { name }).boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  }
 });
 
-test('opret blok fra tom celle; bevaret efter genindlæsning og synlig i læsevisning i anden session', async ({ page, request, browser }) => {
+test('2) ny klasse: hold, lærer og titlen "Balletklasse"; tider først ved "Egne tider"; kladde tæller ikke', async ({ page, request }) => {
   await resetData(request, fixture());
   await loginAdmin(page);
-  const target = cell(page, 0, 0, 'room-1');
-  await target.click({ position: { x: 20, y: 20 } });
-  const dialog = page.getByRole('dialog', { name: 'Ny blok' });
-  await dialog.getByLabel('Fag').selectOption({ label: 'Klassisk ballet' });
-  await dialog.getByLabel('Hold').selectOption({ label: 'Hold 3' });
-  await dialog.getByRole('button', { name: 'TH' }).click();
-  await dialog.getByLabel('Start').fill('08.10');
-  await dialog.getByLabel('Slut').fill('09.50');
-  await expect(dialog.locator('.duration-out')).toContainText('1 t 40 min');
-  await dialog.getByRole('button', { name: 'Opret' }).click();
-  await expect(target.locator('.block')).toContainText('08.10–09.50');
-  await expect(teacherRow(page, 'TH')).toContainText('1 t 40 min');
-  await waitSaved(page);
-
-  await page.reload();
-  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('08.10–09.50');
-
-  const ctx = await browser.newContext();
-  const viewer = await ctx.newPage();
-  await viewer.goto('/');
-  await viewer.getByLabel('Adgangskode').fill(VIEWER_PW);
-  await viewer.getByRole('button', { name: 'Log ind' }).click();
-  await expect(viewer.locator('.block')).toContainText('Klassisk ballet');
-  await expect(viewer.getByText('Timeoverblik')).toHaveCount(0);
-  expect(await viewer.content()).not.toContain('1.600');
-  await ctx.close();
-});
-
-test('afviser ugyldigt tidsinterval og manglende felter', async ({ page, request }) => {
-  await resetData(request, fixture());
-  await loginAdmin(page);
-  await cell(page, 1, 1, 'room-2').click({ position: { x: 20, y: 20 } });
-  const dialog = page.getByRole('dialog', { name: 'Ny blok' });
-  await dialog.getByLabel('Start').fill('11.00');
-  await dialog.getByLabel('Slut').fill('10.00');
-  await dialog.getByRole('button', { name: 'Opret' }).click();
-  await expect(dialog.locator('.errors')).toContainText('Sluttid skal ligge efter starttid');
-  await expect(dialog.locator('.errors')).toContainText('Vælg et fag');
-  await expect(dialog.locator('.errors')).toContainText('Vælg mindst én lærer');
-  await dialog.getByRole('button', { name: 'Annuller' }).click();
-  await expect(page.locator('.block')).toHaveCount(0);
-});
-
-test('træk inden for samme dagdel bevarer klokkeslæt; fortryd flytter tilbage', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
-  await loginAdmin(page);
-  { const p = await dragPoints(page, block(page, 'A'), cell(page, 1, 0, 'room-3')); await mouseDrag(page, p.from, p.to); }
-  await expect(cell(page, 1, 0, 'room-3').locator('.block')).toContainText('09.00–11.00');
-  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toHaveCount(0);
-  await expect(page.locator('.toast')).toContainText('Flyttet til Tirsdag');
-  await page.locator('.toast-action', { hasText: 'Fortryd' }).click();
-  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('09.00–11.00');
-});
-
-test('flytning fredag → lørdag ændrer lørdagstillæg, ikke varighed', async ({ page, request }) => {
-  await resetData(request, fixture([blk({ id: 'F', day: 4 })]));
-  await loginAdmin(page);
-  await teacherRow(page, 'TH').click();
-  const L = page.locator('.week-box .stat', { hasText: 'Lørdagstillæg' });
-  await expect(L).toContainText('0 min');
-  { const p = await dragPoints(page, block(page, 'F'), cell(page, 5, 0, 'room-1')); await mouseDrag(page, p.from, p.to); }
-  await expect(cell(page, 5, 0, 'room-1').locator('.block')).toContainText('2 t');
-  await expect(L).toContainText('1 t');
-  await expect(page.locator('.week-box .stat', { hasText: 'Faktisk undervisningstid' })).toContainText('2 t');
-});
-
-test('træk til anden dagdel åbner tidsvælger; annuller bevarer originalen', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
-  await loginAdmin(page);
-  const target = cell(page, 0, 2, 'room-2');
-  { const p = await dragPoints(page, block(page, 'A'), target); await mouseDrag(page, p.from, p.to); }
-  const picker = page.getByRole('dialog', { name: /Flyt: vælg tid/ });
-  await expect(picker).toBeVisible();
-  await expect(picker.getByLabel('Ny start')).toHaveValue('13.00');
-  await expect(picker).toContainText('13.00–15.00');
-  await picker.getByRole('button', { name: 'Annuller' }).click();
-  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('09.00–11.00');
-
-  { const p = await dragPoints(page, block(page, 'A'), target); await mouseDrag(page, p.from, p.to); }
-  await picker.getByLabel('Ny start').fill('14.15');
-  await picker.getByRole('button', { name: 'Flyt hertil' }).click();
-  await expect(target.locator('.block')).toContainText('14.15–16.15');
-  await expect(page.locator('.toast')).toContainText('før 09.00–11.00');
-});
-
-test('kopiér via menu: nyt id, original bevaret, uafhængig redigering, kopi i samme celle foreslår ny tid', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
-  await loginAdmin(page);
-  await block(page, 'A').getByRole('button', { name: /Handlinger/ }).click();
-  await page.getByRole('menuitem', { name: /Kopiér/ }).click();
-  await expect(page.locator('.banner-copy')).toBeVisible();
-  await cell(page, 2, 0, 'room-2').locator('.place-target').click();
-  const copy = cell(page, 2, 0, 'room-2').locator('.block');
-  await expect(copy).toContainText('09.00–11.00');
-  await expect(block(page, 'A')).toBeVisible();
-  const copyId = await copy.getAttribute('data-block-id');
-  expect(copyId).not.toBe('A');
-  await expect(teacherRow(page, 'TH')).toContainText('4 t');
-
-  await copy.click();
-  const dialog = page.getByRole('dialog', { name: 'Rediger blok' });
-  await dialog.getByLabel('Hold').selectOption({ label: 'Hold 4' });
-  await dialog.getByRole('button', { name: 'Gem' }).click();
-  await expect(copy).toContainText('Hold 4');
-  await expect(block(page, 'A')).toContainText('Hold 3');
-
-  // Kopi til samme celle: ingen kopi oven på originalen – tidsvælger foreslår efter eksisterende blok
-  await block(page, 'A').focus();
-  await page.keyboard.press('k');
+  await page.getByRole('button', { name: 'Tilføj ny klasse' }).click();
+  const panel = page.getByRole('dialog', { name: 'Tilføj ny klasse' });
+  await expect(panel.getByLabel('Titel')).toHaveValue('Balletklasse');
+  await expect(panel.getByLabel('Start')).toHaveCount(0);
+  await panel.getByLabel('Egne tider').check();
+  await expect(panel.getByLabel('Start')).toBeVisible();
+  await panel.getByLabel('Egne tider').uncheck();
+  await panel.getByRole('button', { name: 'Hold 8', exact: true }).click();
+  await panel.getByRole('button', { name: 'TH' }).click();
+  await panel.getByRole('button', { name: 'Opret og placér' }).click();
+  await expect(page.locator('.place-bar')).toBeVisible();
+  await expect(teacherRow(page, 'TH').locator('.hours-total')).toHaveText('0 min');
+  // 3) placering giver kildens tid: Hold 8 mandag morgen 8.10–9.55 (KDS!L4)
   await cell(page, 0, 0, 'room-1').locator('.place-target').click();
-  const picker = page.getByRole('dialog', { name: /Kopiér: vælg tid/ });
-  await expect(picker.getByLabel('Ny start')).toHaveValue('11.00');
-  await expect(picker).toContainText('vises i formiddag');
-  await picker.getByRole('button', { name: 'Kopiér hertil' }).click();
-  await expect(cell(page, 0, 1, 'room-1').locator('.block')).toContainText('11.00–13.00');
-  await expect(block(page, 'A')).toContainText('09.00–11.00');
-  await expect(page.locator('.btn-conflict')).toHaveCount(0);
+  await expect(only(page)).toContainText('08.10–09.55');
+  await expect(await teacherDetail(page, 'TH')).toContainText('1 t 45 min');
   await waitSaved(page);
 });
 
-test('konflikt for anden lærer: annuller bevarer, "Behold med konflikt" markerer og tæller med', async ({ page, request }) => {
-  const C = blk({ id: 'C', teacherIds: ['co'], roomId: 'room-2', groupId: 'h4', start: 600, end: 720 });
-  await resetData(request, fixture([A, C]));
+test('3–5) flytning mandag → fredag → lørdag ændrer tid, varighed og tillæg; fortryd gendanner', async ({ page, request }) => {
+  const d = fixture();
+  await resetData(request, fixture([ruleBlock(d, { groupIds: [H8], day: 0, period: 0 })]));
   await loginAdmin(page);
-  await expect(teacherRow(page, 'CO')).toContainText('2 t');
-
-  await block(page, 'A').click();
-  let dialog = page.getByRole('dialog', { name: 'Rediger blok' });
-  await dialog.getByRole('button', { name: 'CO' }).click();
-  await expect(dialog.locator('.notice-conflict')).toContainText('Lærer CO');
-  await dialog.getByRole('button', { name: 'Gem' }).click();
-  const conflict = page.getByRole('dialog', { name: /Konflikt/ });
-  await expect(conflict).toContainText('Lærer CO er optaget af Klassisk ballet · Hold 4');
-  await conflict.getByRole('button', { name: 'Annuller ændringen' }).click();
-  await expect(conflict).toHaveCount(0);
-  await dialog.getByRole('button', { name: 'Annuller' }).click();
-  await expect(block(page, 'A').locator('.chip')).toHaveCount(1);
-  await expect(teacherRow(page, 'CO')).toContainText('2 t');
-
-  await block(page, 'A').click();
-  dialog = page.getByRole('dialog', { name: 'Rediger blok' });
-  await dialog.getByRole('button', { name: 'CO' }).click();
-  await dialog.getByRole('button', { name: 'Gem' }).click();
-  await page.getByRole('button', { name: 'Behold med konflikt' }).click();
-  await expect(block(page, 'A')).toHaveClass(/block-conflict/);
-  await expect(block(page, 'C')).toHaveClass(/block-conflict/);
-  await expect(page.locator('.btn-conflict')).toContainText('1');
-  await expect(teacherRow(page, 'CO')).toContainText('4 t');
-  await expect(page.locator('.panel .notice-conflict')).toContainText('1 konflikt');
-
-  // Fjern CO igen → begge opgørelser opdateres straks
-  await block(page, 'A').click();
-  dialog = page.getByRole('dialog', { name: 'Rediger blok' });
-  await dialog.getByRole('button', { name: 'CO' }).click();
-  await dialog.getByRole('button', { name: 'Gem' }).click();
-  await expect(teacherRow(page, 'CO')).toContainText('2 t');
-  await expect(page.locator('.btn-conflict')).toHaveCount(0);
-});
-
-test('tastatur: M + piletast + Enter flytter blokken', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
-  await loginAdmin(page);
-  await block(page, 'A').focus();
-  await page.keyboard.press('m');
-  await expect(page.locator('.banner-move')).toBeVisible();
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Enter');
-  // Ned = formiddag → tidsvælger; Enter bekræfter forslaget
-  const picker = page.getByRole('dialog', { name: /Flyt: vælg tid/ });
-  await expect(picker.getByLabel('Ny start')).toHaveValue('10.00');
-  await page.keyboard.press('Enter');
-  await expect(cell(page, 0, 1, 'room-2').locator('.block')).toContainText('10.00–12.00');
-});
-
-test('fortryd og annuller fortryd af lærerliste gemmes og overlever genindlæsning', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
-  await loginAdmin(page);
-  await block(page, 'A').click();
-  const dialog = page.getByRole('dialog', { name: 'Rediger blok' });
-  await dialog.getByRole('button', { name: 'CO' }).click();
-  await dialog.getByRole('button', { name: 'Gem' }).click();
-  await expect(teacherRow(page, 'CO')).toContainText('2 t');
-  await page.locator('.toast-action', { hasText: 'Fortryd' }).last().click();
-  await expect(teacherRow(page, 'CO')).toContainText('0 min');
-  await page.keyboard.press('Control+Shift+z');
-  await expect(teacherRow(page, 'CO')).toContainText('2 t');
+  const th = await teacherDetail(page, 'TH');
+  await expect(th).toContainText('1 t 45 min');
+  await moveVia(page, blockEl(page, 'b1'), cell(page, 4, 0, 'room-2'));
+  await expect(cell(page, 4, 0, 'room-2').locator('.block')).toContainText('08.25–09.55'); // fredag KDS!L28
+  await expect(page.locator('.toast')).toContainText('før 08.10–09.55');
+  await expect(th.locator('dl > div', { hasText: 'Undervisning' })).toContainText('1 t 30 min');
+  await expect(th.locator('dl > div', { hasText: 'Lørdagstillæg' })).toHaveCount(0);
+  await dragTo(page, blockEl(page, 'b1'), cell(page, 5, 0, 'room-2')); // fredag → lørdag ligger tæt: træk
+  await expect(cell(page, 5, 0, 'room-2').locator('.block')).toContainText('08.25–09.55'); // lørdag KDS!D34
+  await expect(th.locator('dl > div', { hasText: 'Lørdagstillæg' })).toContainText('45 min');
+  await expect(teacherRow(page, 'TH').locator('.hours-total')).toHaveText('2 t 38 min');
+  // 11) Fortryd gendanner placering, tid og optælling
   await page.keyboard.press('Control+z');
-  await expect(teacherRow(page, 'CO')).toContainText('0 min');
+  await expect(cell(page, 4, 0, 'room-2').locator('.block')).toContainText('08.25–09.55');
+  await page.keyboard.press('Control+z');
+  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('08.10–09.55');
+  await expect(th.locator('dl > div', { hasText: 'Undervisning' })).toContainText('1 t 45 min');
+  await waitSaved(page);
+  // 12) bevaret efter genindlæsning
+  await page.reload();
+  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('08.10–09.55');
+});
+
+test('6) fredagens tider gælder, uanset om morgensamlingen er bemandet; morgensamling tæller kun med lærer og findes én gang', async ({ page, request }) => {
+  const d = fixture();
+  await resetData(request, fixture([ruleBlock(d, { groupIds: [H8], day: 4, period: 0 })]));
+  await loginAdmin(page);
+  const chip = page.locator('.assembly');
+  await expect(chip).toHaveCount(1);
+  await expect(chip).toContainText('ingen lærer valgt');
+  await expect(teacherRow(page, 'TH').locator('.hours-total')).toHaveText('1 t 53 min');
+  await chip.click();
+  await page.getByRole('tab', { name: 'Morgensamling' }).click();
+  await page.getByLabel('Lærer til morgensamling').selectOption({ label: 'TH' });
+  await page.getByRole('button', { name: 'Luk indstillinger' }).click();
+  await expect(chip.locator('.chip')).toHaveText('TH');
+  await expect(blockEl(page, 'b1')).toContainText('08.25–09.55');
+  await expect(teacherRow(page, 'TH').locator('.hours-total')).toHaveText('2 t 5 min'); // 112,5 + 12,5 min
+  await chip.click();
+  await page.getByRole('tab', { name: 'Morgensamling' }).click();
+  await page.getByLabel('Lærer til morgensamling').selectOption({ label: 'CO' });
+  await page.getByRole('button', { name: 'Luk indstillinger' }).click();
+  await expect(teacherRow(page, 'TH').locator('.hours-total')).toHaveText('1 t 53 min');
+  await expect(teacherRow(page, 'CO').locator('.hours-total')).toHaveText('13 min');
   await waitSaved(page);
   await page.reload();
-  await expect(block(page, 'A').locator('.chip')).toHaveCount(1);
+  await expect(page.locator('.assembly')).toHaveCount(1);
+  await expect(page.locator('.assembly .chip')).toHaveText('CO');
+  await page.locator('.assembly').click();
+  await page.getByRole('tab', { name: 'Morgensamling' }).click();
+  await page.getByLabel('Lærer til morgensamling').selectOption('');
+  await page.getByRole('button', { name: 'Luk indstillinger' }).click();
+  await expect(teacherRow(page, 'CO').locator('.hours-total')).toHaveText('0 min');
 });
 
-test('lagringsfejl vises ærligt og kan prøves igen uden datatab', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
+test('7) egne tider bevares ved flytning til anden sal, dag, dagdel og lørdag; bevaret efter genindlæsning', async ({ page, request }) => {
+  await resetData(request, fixture());
   await loginAdmin(page);
-  await page.route('**/api/data', (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 500, body: '{"error":"Serverfejl"}' }) : route.continue()));
-  await block(page, 'A').focus();
+  await cell(page, 0, 1, 'room-2').click({ position: { x: 20, y: 20 } });
+  const panel = page.getByRole('dialog', { name: 'Tilføj ny klasse' });
+  await panel.getByRole('button', { name: 'Hold 6', exact: true }).click();
+  await panel.getByRole('button', { name: 'TH' }).click();
+  await panel.getByLabel('Titel').fill('Spidsdans');
+  await panel.getByLabel('Egne tider').check();
+  await panel.getByLabel('Start').fill('9.10');
+  await panel.getByLabel('Slut').fill('9.55');
+  await panel.getByRole('button', { name: 'Opret' }).click();
+  const b = page.locator('.board .block', { hasText: 'Spidsdans' });
+  await expect(b).toContainText('09.10–09.55');
+  await expect(b.locator('.lock-icon')).toHaveCount(1);
+  for (const [day, period, room] of [
+    [0, 1, 'room-5'],
+    [2, 1, 'room-5'],
+    [2, 3, 'room-5'],
+    [5, 2, 'room-5'],
+  ] as const) {
+    if (day === 0) await dragTo(page, b, cell(page, day, period, room));
+    else await moveVia(page, b, cell(page, day, period, room));
+    await expect(cell(page, day, period, room).locator('.block')).toContainText('09.10–09.55');
+  }
+  await expect((await teacherDetail(page, 'TH')).locator('dl > div', { hasText: 'Lørdagstillæg' })).toContainText('23 min');
+  await waitSaved(page);
+  await page.reload();
+  await expect(cell(page, 5, 2, 'room-5').locator('.block')).toContainText('09.10–09.55');
+  await expect(cell(page, 5, 2, 'room-5').locator('.lock-icon')).toHaveCount(1);
+});
+
+test('8) fælles klasse med to hold og to lærere: én blok, begge lærere får hele tiden, ingen dobbelttælling', async ({ page, request }) => {
+  await resetData(request, fixture());
+  await loginAdmin(page);
+  await cell(page, 5, 1, 'room-3').click({ position: { x: 20, y: 20 } });
+  const panel = page.getByRole('dialog', { name: 'Tilføj ny klasse' });
+  await panel.getByRole('button', { name: 'Hold 8', exact: true }).click();
+  await panel.getByRole('button', { name: 'Hold 9', exact: true }).click();
+  await panel.getByRole('button', { name: 'FM' }).click();
+  await panel.getByRole('button', { name: 'HC' }).click();
+  await panel.getByLabel('Titel').fill('PDD');
+  await panel.getByRole('button', { name: 'Opret' }).click();
+  await expect(page.locator('.board .block')).toHaveCount(1);
+  await expect(only(page)).toContainText('10.10–11.45'); // KDS!D35 fælles regel
+  await expect(only(page)).toContainText('Hold 8 + 9');
+  for (const t of ['FM', 'HC']) {
+    await expect((await teacherDetail(page, t)).locator('dl > div', { hasText: 'Undervisning' })).toContainText('1 t 35 min');
+  }
+});
+
+test('9) manglende regel opfinder ikke en tid: annuller bevarer, "Egne tider" er et aktivt valg; flere muligheder giver et valg', async ({ page, request }) => {
+  const d = fixture([]);
+  d.blocks = [ruleBlock(d, { groupIds: [H6], day: 0, period: 0 })];
+  // To varianter for Hold 6 onsdag middag (manuelle regler til testen)
+  d.timeRules.push(
+    { id: 'x1', groupIds: [H6], day: 2, period: 2, start: 710, end: 755, label: 'A', note: '', source: 'Manuel' },
+    { id: 'x2', groupIds: [H6], day: 2, period: 2, start: 730, end: 800, label: 'B', note: '', source: 'Manuel' },
+  );
+  await resetData(request, d);
+  await loginAdmin(page);
+  await dragTo(page, blockEl(page, 'b1'), cell(page, 1, 1, 'room-2')); // tirsdag formiddag: ingen regel for Hold 6
+  const none = page.getByRole('dialog', { name: 'Ingen tidsregel' });
+  await expect(none).toBeVisible();
+  await none.getByRole('button', { name: 'Annuller' }).click();
+  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('08.10–09.55');
+  await moveVia(page, blockEl(page, 'b1'), cell(page, 2, 2, 'room-2'));
+  const choice = page.getByRole('dialog', { name: 'Vælg tidsrum' });
+  await expect(choice.getByRole('button')).toHaveCount(3); // to tidsrum + annuller
+  await choice.getByRole('button', { name: /12\.10–13\.20/ }).click();
+  await expect(cell(page, 2, 2, 'room-2').locator('.block')).toContainText('12.10–13.20');
+  await expect(cell(page, 2, 2, 'room-2').locator('.lock-icon')).toHaveCount(0);
+});
+
+test('konflikt: annuller bevarer, "Behold med konflikt" markerer og tæller med', async ({ page, request }) => {
+  const d = fixture();
+  d.blocks = [ruleBlock(d, { id: 'a', groupIds: [H8], day: 0, period: 0, teacherIds: ['th'] }), ruleBlock(d, { id: 'b', groupIds: [H9], day: 0, period: 0, roomId: 'room-2', teacherIds: ['co'] })];
+  await resetData(request, d);
+  await loginAdmin(page);
+  await blockEl(page, 'a').click();
+  await page.getByRole('button', { name: 'Redigér' }).click();
+  await page.getByRole('dialog', { name: 'Redigér klasse' }).getByRole('button', { name: 'CO' }).click();
+  await page.getByRole('button', { name: 'Gem' }).click();
+  const dlg = page.getByRole('dialog', { name: /Konflikt/ });
+  await expect(dlg).toContainText('Lærer CO er optaget af Balletklasse · Hold 9');
+  await dlg.getByRole('button', { name: 'Annuller' }).click();
+  await page.keyboard.press('Escape');
+  await expect(blockEl(page, 'a').locator('.chip')).toHaveCount(1);
+  await blockEl(page, 'a').click();
+  await page.getByRole('button', { name: 'Redigér' }).click();
+  await page.getByRole('dialog', { name: 'Redigér klasse' }).getByRole('button', { name: 'CO' }).click();
+  await page.getByRole('button', { name: 'Gem' }).click();
+  await page.getByRole('button', { name: 'Behold med konflikt' }).click();
+  await expect(blockEl(page, 'a')).toHaveClass(/block-conflict/);
+  await expect(page.locator('.hours-alert')).toContainText('1 konflikt');
+});
+
+test('ændring af tidsregel opdaterer klasser samlet og kan fortrydes; egne tider røres ikke', async ({ page, request }) => {
+  const d = fixture();
+  d.blocks = [ruleBlock(d, { id: 'r', groupIds: [H8], day: 0, period: 0 }), { ...ruleBlock(d, { id: 'c', groupIds: [H8], day: 1, period: 0, roomId: 'room-3' }), timeMode: 'custom', ruleId: null, start: 490, end: 595 }];
+  await resetData(request, d);
+  await loginAdmin(page);
+  await page.getByRole('button', { name: 'Indstillinger og øvrige funktioner' }).click();
+  await page.getByRole('button', { name: /Tidsregler og morgensamling/ }).click();
+  await page.getByRole('combobox', { name: 'Vis hold' }).selectOption({ label: 'Hold 8' });
+  const start = page.getByLabel('Start for Hold 8 man morgen');
+  await start.fill('8.20');
+  await start.press('Enter');
+  await page.getByRole('button', { name: 'Luk indstillinger' }).click();
+  await expect(blockEl(page, 'r')).toContainText('08.20–09.55');
+  await expect(blockEl(page, 'c')).toContainText('08.10–09.55');
+  await page.keyboard.press('Control+z');
+  await expect(blockEl(page, 'r')).toContainText('08.10–09.55');
+});
+
+test('lagringsfejl vises tydeligt og kan prøves igen uden datatab', async ({ page, request }) => {
+  const d = fixture();
+  await resetData(request, fixture([ruleBlock(d, { groupIds: [H8], day: 0, period: 0 })]));
+  await loginAdmin(page);
+  await page.route('**/api/data', (r) => (r.request().method() === 'PUT' ? r.fulfill({ status: 500, body: '{"error":"Serverfejl"}' }) : r.continue()));
+  await blockEl(page, 'b1').focus();
   await page.keyboard.press('Delete');
-  await expect(page.locator('.save')).toContainText('Kunne ikke gemme');
-  await expect(page.locator('.banner-error')).toContainText('bevaret i browseren');
+  await expect(page.locator('.save-err')).toContainText('Kunne ikke gemme');
+  await expect(page.locator('.banner-error')).toBeVisible();
   await page.unroute('**/api/data');
   await page.getByRole('button', { name: 'Prøv igen' }).click();
   await waitSaved(page);
   await page.reload();
-  await expect(page.locator('.block')).toHaveCount(0);
+  await expect(page.locator('.board .block')).toHaveCount(0);
 });
 
 test('forældet vindue overskriver ikke nyere data', async ({ browser, request }) => {
-  await resetData(request, fixture([A, blk({ id: 'X', day: 2 })]));
-  const ctxA = await browser.newContext();
-  const ctxB = await browser.newContext();
-  const a = await ctxA.newPage();
-  const b = await ctxB.newPage();
+  const d = fixture();
+  await resetData(request, fixture([ruleBlock(d, { id: 'a', groupIds: [H8], day: 0, period: 0 }), ruleBlock(d, { id: 'x', groupIds: [H9], day: 2, period: 0 })]));
+  const [ca, cb] = [await browser.newContext(), await browser.newContext()];
+  const [a, b] = [await ca.newPage(), await cb.newPage()];
   await loginAdmin(a);
   await loginAdmin(b);
-  await a.locator('[data-block-id="X"]').focus();
+  await blockEl(a, 'x').focus();
   await a.keyboard.press('Delete');
   await waitSaved(a);
-  await b.locator('[data-block-id="A"]').focus();
+  await blockEl(b, 'a').focus();
   await b.keyboard.press('Delete');
   await expect(b.locator('.banner-error')).toContainText('ændret i et andet vindue');
-  await expect(b.locator('.save')).toContainText('Ikke gemt');
-  await b.getByRole('button', { name: /Hent nyeste/ }).click();
-  await expect(b.locator('[data-block-id="X"]')).toHaveCount(0);
-  await expect(b.locator('[data-block-id="A"]')).toHaveCount(1);
-  await ctxA.close();
-  await ctxB.close();
+  await b.getByRole('button', { name: 'Hent nyeste' }).click();
+  await expect(blockEl(b, 'x')).toHaveCount(0);
+  await expect(blockEl(b, 'a')).toHaveCount(1);
+  await ca.close();
+  await cb.close();
 });
 
-test('manglende satser og årsdata vises som manglende, ikke som 0', async ({ page, request }) => {
-  const d = fixture([A, B]);
-  d.settings.prepPercent = null;
-  d.settings.teachingWeeks = null;
-  await resetData(request, d);
-  await loginAdmin(page);
-  await expect(page.locator('.panel .notice-warn')).toContainText('forberedelsesprocent');
-  await teacherRow(page, 'TH').click();
-  await expect(page.locator('.week-box .stat', { hasText: 'Forberedelsestid' })).toContainText('—');
-  await expect(page.locator('.year-box .stat', { hasText: 'Resterende' })).toContainText('mangler');
+test('læseadgang: kun skemaet, ingen redigering, ingen timer', async ({ browser, request }) => {
+  const d = fixture();
+  await resetData(request, fixture([ruleBlock(d, { groupIds: [H8], day: 0, period: 0 })]));
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.getByLabel('Adgangskode').fill(VIEWER_PW);
+  await page.getByRole('button', { name: 'Log ind' }).click();
+  await expect(page.locator('.board .block')).toContainText('08.10–09.55');
+  await expect(page.locator('.hours')).toHaveCount(0);
+  expect((await page.request.put('/api/data', { data: { baseVersion: 1, data: {} } })).status()).toBe(403);
+  await ctx.close();
 });
 
-test('touch: langt tryk og træk flytter blokken (tablet)', async ({ browser, request }) => {
-  await resetData(request, fixture([A]));
-  const ctx = await browser.newContext({ hasTouch: true, viewport: { width: 1280, height: 900 } });
+test('13) iPad vandret: skema og optælling samtidig, touch-træk og læsbar tekst', async ({ browser, request }) => {
+  const d = fixture();
+  await resetData(request, fixture([ruleBlock(d, { groupIds: [H8], day: 0, period: 0 })]));
+  const ctx = await browser.newContext({ hasTouch: true, viewport: { width: 1180, height: 820 } });
   const page = await ctx.newPage();
   await loginAdmin(page);
-  const { from, to } = await dragPoints(page, block(page, 'A'), cell(page, 0, 0, 'room-3'));
+  await expect(page.locator('.board')).toBeVisible();
+  await expect(page.locator('.hours')).toBeVisible();
+  const fs = await page.locator('.block-title').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(fs).toBeGreaterThanOrEqual(13);
+  const p = await (await import('./helpers')).dragPoints(page, blockEl(page, 'b1'), cell(page, 0, 0, 'room-3'));
   const cdp = await ctx.newCDPSession(page);
-  const touch = (type: string, p?: { x: number; y: number }) =>
-    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: p ? [{ x: p.x, y: p.y, id: 1 }] : [] });
-  await touch('touchStart', from);
+  const touch = (type: string, pt?: { x: number; y: number }) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pt ? [{ x: pt.x, y: pt.y, id: 1 }] : [] });
+  await touch('touchStart', p.from);
   await page.waitForTimeout(400);
   for (let i = 1; i <= 12; i++) {
-    await touch('touchMove', { x: from.x + ((to.x - from.x) * i) / 12, y: from.y + ((to.y - from.y) * i) / 12 });
+    await touch('touchMove', { x: p.from.x + ((p.to.x - p.from.x) * i) / 12, y: p.from.y + ((p.to.y - p.from.y) * i) / 12 });
     await page.waitForTimeout(16);
   }
-  await expect(page.locator('.cell-over')).toHaveAttribute('data-cell', 'cell|0|0|room-3');
   await touch('touchEnd');
-  await expect(cell(page, 0, 0, 'room-3').locator('.block')).toContainText('09.00–11.00');
+  await expect(cell(page, 0, 0, 'room-3').locator('.block')).toContainText('08.10–09.55');
   await ctx.close();
 });
 
-test('læseadgang: ingen redigering, /admin kræver administrator', async ({ browser }) => {
-  const ctx = await browser.newContext();
-  const page = await ctx.newPage();
-  await page.goto('/');
-  await page.getByLabel('Adgangskode').fill(VIEWER_PW);
-  await page.getByRole('button', { name: 'Log ind' }).click();
-  await expect(page.locator('.view-badge')).toBeVisible();
-  await expect(page.locator('.block-menu-btn')).toHaveCount(0);
-  const res = await page.request.put('/api/data', { data: { baseVersion: 1, data: {} } });
-  expect(res.status()).toBe(403);
-  await page.goto('/admin');
-  await expect(page.getByRole('heading', { name: 'Administrator' })).toBeVisible();
-  await ctx.close();
-});
-
-test('læsevisning henter nye ændringer automatisk', async ({ browser, request }) => {
-  test.setTimeout(45_000);
-  await resetData(request, fixture([A]));
-  const ctx = await browser.newContext();
-  const page = await ctx.newPage();
-  await page.goto('/');
-  await page.getByLabel('Adgangskode').fill(VIEWER_PW);
-  await page.getByRole('button', { name: 'Log ind' }).click();
-  await expect(page.locator('.block')).toHaveCount(1);
-  await resetData(request, fixture([A, blk({ id: 'NY', day: 3, subjectId: 'rep' })]));
-  await expect(page.locator('.block')).toHaveCount(2, { timeout: 20_000 });
-  await expect(page.locator('.block', { hasText: 'Repertoire' })).toBeVisible();
-  await ctx.close();
-});
-
-test('Alt + træk kopierer i stedet for at flytte', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
+test('tæt besat uge fra dokumentet: indlæses fra Indstillinger, kan fortrydes', async ({ page, request }) => {
+  await resetData(request, fixture());
   await loginAdmin(page);
-  const p = await dragPoints(page, block(page, 'A'), cell(page, 1, 0, 'room-4'));
-  await mouseDrag(page, p.from, p.to, { alt: true });
-  await expect(cell(page, 1, 0, 'room-4').locator('.block')).toContainText('09.00–11.00');
-  await expect(block(page, 'A')).toBeVisible();
-  await expect(page.locator('.toast')).toContainText('Kopi oprettet');
-});
-
-test('gendan tidligere version fra serverens historik (kan fortrydes)', async ({ page, request }) => {
-  await resetData(request, fixture([A]));
-  await loginAdmin(page);
-  await block(page, 'A').focus();
-  await page.keyboard.press('Delete');
-  await waitSaved(page);
-  await expect(page.locator('.block')).toHaveCount(0);
-  await page.getByLabel('Indstillinger').click();
-  await page.getByRole('tab', { name: 'Data og backup' }).click();
-  await expect(page.locator('.rev-table')).toContainText('Nuværende');
-  await page.locator('.rev-table').getByRole('button', { name: 'Gendan' }).first().click();
-  await page.getByRole('button', { name: 'Færdig' }).click();
-  await expect(block(page, 'A')).toBeVisible();
-  await waitSaved(page);
+  await page.getByRole('button', { name: 'Indstillinger og øvrige funktioner' }).click();
+  await page.getByRole('button', { name: /Tidsregler og morgensamling/ }).click();
+  await page.getByRole('tab', { name: 'Kilde' }).click();
+  await page.getByRole('button', { name: 'Indlæs ugeskemaet fra kilden' }).click();
+  await page.getByRole('button', { name: 'Erstat klasser' }).click();
+  await page.getByRole('button', { name: 'Luk indstillinger' }).click();
+  await expect(page.locator('.board .block')).toHaveCount(67);
+  await expect(page.locator('.hours-alert')).toHaveCount(0);
   await page.keyboard.press('Control+z');
-  await expect(page.locator('.block')).toHaveCount(0);
-});
-
-test('en besked nederst blokerer aldrig knapper i en åben dialog', async ({ page, request }) => {
-  const d = fixture([A]);
-  d.subjects[0].name = 'Et meget langt fagnavn der fylder godt op i redigeringen, så panelet bliver højt';
-  await resetData(request, d);
-  await page.setViewportSize({ width: 1440, height: 640 });
-  await loginAdmin(page);
-  for (let i = 0; i < 3; i++) {
-    await block(page, 'A').click();
-    const dialog = page.getByRole('dialog', { name: 'Rediger blok' });
-    await dialog.getByLabel('Note').fill(`note ${i}`);
-    await dialog.getByRole('button', { name: 'Gem' }).click({ timeout: 2000 });
-    await expect(dialog).toHaveCount(0);
-  }
+  await expect(page.locator('.board .block')).toHaveCount(0);
 });

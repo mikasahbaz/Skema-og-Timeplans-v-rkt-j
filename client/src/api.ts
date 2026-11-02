@@ -1,3 +1,4 @@
+import type { publicProjection } from '../../shared/public';
 import type { AppData } from '../../shared/schema';
 
 export type Role = 'admin' | 'viewer' | null;
@@ -39,10 +40,7 @@ export interface Session {
   standalone?: boolean;
 }
 
-export type PublicData = Pick<AppData, 'rooms' | 'blocks' | 'subjects' | 'groups'> & {
-  teachers: Omit<AppData['teachers'][number], 'annualHours'>[];
-  settings: Pick<AppData['settings'], 'daypartStarts'>;
-};
+export type PublicData = ReturnType<typeof publicProjection>;
 
 export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
 
@@ -82,6 +80,6 @@ export interface RevisionInfo {
 export interface Counts {
   blocks: number;
   teachers: number;
-  subjects: number;
+  rules: number;
   groups: number;
 }

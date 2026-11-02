@@ -2,6 +2,7 @@
 // den rigtige server (validering, versionskontrol, læsevisning uden årstimer).
 // Data gemmes i browserens localStorage og deles ikke med andre.
 import { demoAppData } from '../../shared/demo';
+import { migrateAny } from '../../shared/migrate';
 import { publicProjection } from '../../shared/public';
 import type { AppData } from '../../shared/schema';
 import { validateAppData } from '../../shared/validate';
@@ -36,7 +37,9 @@ function load(): Db {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const db = JSON.parse(raw) as Db;
-      if (validateAppData(db.data).ok) return (memory = db);
+      // Ældre prøvedata bringes op på den aktuelle datamodel.
+      const v = validateAppData(migrateAny(db.data).data);
+      if (v.ok) return (memory = { ...db, data: v.data! });
     }
   } catch {
     /* privat vindue o.l. – brug hukommelsen */
@@ -61,7 +64,7 @@ function save(db: Db, data: AppData, source: string) {
   return { version, updatedAt };
 }
 
-const counts = (d: AppData) => ({ blocks: d.blocks.length, teachers: d.teachers.length, subjects: d.subjects.length, groups: d.groups.length });
+const counts = (d: AppData) => ({ blocks: d.blocks.length, teachers: d.teachers.length, groups: d.groups.length, rules: d.timeRules.length });
 const unwrap = (b: unknown) =>
   b && typeof b === 'object' && (b as { format?: string }).format === 'ballet-ugeskema-backup' ? (b as { data: unknown }).data : b;
 
@@ -85,11 +88,11 @@ function handle(method: string, path: string, body: unknown): Response {
     return json(200, save(db, v.data!, 'edit'));
   }
   if (path === '/api/import/preview') {
-    const v = validateAppData(unwrap(body));
+    const v = validateAppData(migrateAny(unwrap(body)).data);
     return json(200, { ok: v.ok, errors: v.errors, incoming: v.ok ? counts(v.data!) : null, current: counts(db.data), currentVersion: db.version });
   }
   if (path === '/api/import') {
-    const v = validateAppData(unwrap(b.backup));
+    const v = validateAppData(migrateAny(unwrap(b.backup)).data);
     if (!v.ok) return json(400, { error: 'Filen er ikke en gyldig backup', errors: v.errors });
     if (b.baseVersion !== db.version) return json(409, { error: 'Skemaet er ændret et andet sted', currentVersion: db.version });
     return json(200, save(db, v.data!, 'import'));

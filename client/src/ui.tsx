@@ -33,12 +33,18 @@ const paths: Record<string, string> = {
   clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
   list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
+  info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
+  chevronRight: 'm9 18 6-6-6-6',
+  edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
 };
 
-export function Icon({ name, size = 16, className }: { name: keyof typeof paths | string; size?: number; className?: string }) {
+export function Icon({ name, size = 16, className, title }: { name: keyof typeof paths | string; size?: number; className?: string; title?: string }) {
   return (
     <svg
       className={className}
+      role={title ? 'img' : undefined}
+      aria-label={title}
       width={size}
       height={size}
       viewBox="0 0 24 24"
@@ -47,8 +53,9 @@ export function Icon({ name, size = 16, className }: { name: keyof typeof paths 
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true"
+      aria-hidden={title ? undefined : true}
     >
+      {title && <title>{title}</title>}
       <path d={paths[name] ?? ''} />
     </svg>
   );

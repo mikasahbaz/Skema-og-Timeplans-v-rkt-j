@@ -1,37 +1,65 @@
 // Rene funktioner, der laver en ny AppData ud fra en handling. Ingen sideeffekter.
 import { nextTeacherColor } from '../../shared/colors';
 import { newId } from '../../shared/ids';
-import type { AppData, Block, Group, Room, Settings, Subject, Teacher } from '../../shared/schema';
+import { recomputeRuleBlocks, resolveTime, type Target } from '../../shared/rules';
+import type { AppData, Block, Group, Room, Settings, Teacher, TimeRule } from '../../shared/schema';
 
 export const upsertBlock = (data: AppData, block: Block): AppData => {
   const exists = data.blocks.some((b) => b.id === block.id);
-  return {
-    ...data,
-    blocks: exists ? data.blocks.map((b) => (b.id === block.id ? block : b)) : [...data.blocks, block],
-  };
+  return { ...data, blocks: exists ? data.blocks.map((b) => (b.id === block.id ? block : b)) : [...data.blocks, block] };
 };
 
-export const deleteBlock = (data: AppData, id: string): AppData => ({
-  ...data,
-  blocks: data.blocks.filter((b) => b.id !== id),
-});
+export const deleteBlock = (data: AppData, id: string): AppData => ({ ...data, blocks: data.blocks.filter((b) => b.id !== id) });
 
-/** Kopi med nyt id; fag, hold, lærerliste og varighed bevares. */
-export const copyOf = (block: Block, patch: Partial<Block>): Block => ({
-  ...block,
-  teacherIds: [...block.teacherIds],
-  ...patch,
-  id: newId('b'),
-});
+/** Resultatet af at placere en klasse i en celle. */
+export type PlaceOutcome =
+  | { kind: 'ok'; block: Block; derived: boolean }
+  | { kind: 'choice'; base: Block; options: TimeRule[] }
+  | { kind: 'none'; base: Block };
 
-/** Del en blok ved et tidspunkt i to sammenhængende blokke. */
-export function splitBlock(data: AppData, id: string, at: number): { data: AppData; second: Block } | null {
-  const b = data.blocks.find((x) => x.id === id);
-  if (!b || at <= b.start || at >= b.end) return null;
-  const second: Block = { ...b, teacherIds: [...b.teacherIds], id: newId('b'), start: at };
-  const blocks = data.blocks.flatMap((x) => (x.id === id ? [{ ...x, end: at }, second] : [x]));
-  return { data: { ...data, blocks }, second };
+/**
+ * Placerer en klasse (ny, flyttet eller kopieret) i en målcelle.
+ * - Egne tider: tidsrummet bevares præcist; kun dag, dagdel og sal ændres.
+ * - Tidsregel: samme dag og dagdel (kun ny sal) bevarer tiden; ellers slås reglen op.
+ */
+export function placeBlock(data: AppData, block: Block, target: Target): PlaceOutcome {
+  const base: Block = { ...block, day: target.day, period: target.period, roomId: target.roomId };
+  if (block.timeMode === 'custom') return { kind: 'ok', block: base, derived: false };
+  const sameSlot = block.day === target.day && block.period === target.period;
+  const r = resolveTime(data.timeRules, block.groupIds, target.day, target.period, sameSlot ? block.ruleId : null);
+  if (r.kind === 'single') return { kind: 'ok', block: { ...base, start: r.start, end: r.end, ruleId: r.ruleId }, derived: r.derived };
+  if (r.kind === 'choice') return { kind: 'choice', base, options: r.options };
+  return { kind: 'none', base };
 }
+
+export const withRule = (block: Block, rule: TimeRule): Block => ({ ...block, timeMode: 'rule', ruleId: rule.id, start: rule.start, end: rule.end });
+
+/** Kopi med nyt id; titel, hold, lærere, tidsmodel og (for egne tider) klokkeslæt bevares. */
+export const copyOf = (block: Block): Block => ({ ...block, teacherIds: [...block.teacherIds], groupIds: [...block.groupIds], id: newId('b') });
+
+// ---- Tidsregler --------------------------------------------------------------
+
+/**
+ * Ændrer tidstabellen og genberegner alle berørte regelklasser i samme handling.
+ * En regelklasse, der ikke længere kan få en entydig tid, beholder sit tidsrum som "Egne tider"
+ * (den ændres altså ikke) og returneres i `toCustom`, så brugeren kan få det at vide.
+ */
+export function updateRules(data: AppData, rules: TimeRule[]) {
+  const r = recomputeRuleBlocks({ ...data, timeRules: rules });
+  if (!r.unresolved.length) return { data: r.data, changed: r.changed, toCustom: [] as string[] };
+  const blocks = r.data.blocks.map((b) => (r.unresolved.includes(b.id) ? { ...b, timeMode: 'custom' as const, ruleId: null } : b));
+  return { data: { ...r.data, blocks }, changed: r.changed, toCustom: r.unresolved };
+}
+
+export const updateRule = (data: AppData, id: string, patch: Partial<TimeRule>) =>
+  updateRules(
+    data,
+    data.timeRules.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+  );
+
+export const addRule = (data: AppData, rule: Omit<TimeRule, 'id'>) => updateRules(data, [...data.timeRules, { ...rule, id: newId('r') }]);
+
+export const removeRule = (data: AppData, id: string) => updateRules(data, data.timeRules.filter((r) => r.id !== id));
 
 // ---- Stamdata ----------------------------------------------------------------
 
@@ -52,16 +80,18 @@ export const updateTeacher = (data: AppData, id: string, patch: Partial<Teacher>
   teachers: data.teachers.map((t) => (t.id === id ? { ...t, ...patch } : t)),
 });
 
-export function addNamed<K extends 'subjects' | 'groups'>(data: AppData, key: K, name: string, prefix: string) {
-  const item = { id: newId(prefix), name: name.trim(), archived: false };
-  return { data: { ...data, [key]: [...data[key], item] } as AppData, item };
+export function addGroup(data: AppData, name: string) {
+  const item: Group = { id: newId('g'), name: name.trim(), archived: false };
+  return { data: { ...data, groups: [...data.groups, item] }, item };
 }
 
-export const updateNamed = <K extends 'subjects' | 'groups'>(data: AppData, key: K, id: string, patch: Partial<Subject & Group>): AppData =>
-  ({ ...data, [key]: (data[key] as (Subject | Group)[]).map((x) => (x.id === id ? { ...x, ...patch } : x)) }) as AppData;
+export const updateGroup = (data: AppData, id: string, patch: Partial<Group>): AppData => ({
+  ...data,
+  groups: data.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+});
 
-export const removeItem = (data: AppData, key: 'teachers' | 'subjects' | 'groups', id: string): AppData =>
-  ({ ...data, [key]: (data[key] as { id: string }[]).filter((x) => x.id !== id) }) as AppData;
+export const removeTeacher = (data: AppData, id: string): AppData => ({ ...data, teachers: data.teachers.filter((t) => t.id !== id) });
+export const removeGroup = (data: AppData, id: string): AppData => ({ ...data, groups: data.groups.filter((g) => g.id !== id) });
 
 export const updateRoom = (data: AppData, id: string, patch: Partial<Room>): AppData => ({
   ...data,
@@ -77,7 +107,7 @@ export function moveRoom(data: AppData, id: string, dir: -1 | 1): AppData {
   return { ...data, rooms };
 }
 
-export const updateSettings = (data: AppData, patch: Partial<Settings>): AppData => ({
-  ...data,
-  settings: { ...data.settings, ...patch },
-});
+export const updateSettings = (data: AppData, patch: Partial<Settings>): AppData => ({ ...data, settings: { ...data.settings, ...patch } });
+
+export const updateAssembly = (data: AppData, patch: Partial<Settings['assembly']>): AppData =>
+  updateSettings(data, { assembly: { ...data.settings.assembly, ...patch } });

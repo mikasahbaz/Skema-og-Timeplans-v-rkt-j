@@ -2,6 +2,9 @@
 
 Kravspecifikation. **Version 2** (denne udgave) har forrang, hvor den ændrer version 1:
 en væsentligt enklere brugerflade og automatiske undervisningstider fra skolens skemadokument.
+**Tilføjelse 3. nov. 2026:** en flytning giver aldrig en fejlmelding – en klasse får altid en tid
+(holdets egen tid fra en anden dag eller dagdelens standardtid), og en manuel rettelse af tiden gør
+klassen til en "anden slags" blok med egne tider.
 Antagelser er markeret **Antagelse**.
 
 ## 1. Formål
@@ -74,13 +77,24 @@ Antagelser er markeret **Antagelse**.
   optælling, gem. Det er én handling og ét fortryd-trin.
 - 6.3 Kun ny sal (samme dag og dagdel): tiden bevares. Anden dag/dagdel: tid og varighed kan ændres.
   Lørdag bruger lørdagens regel; tillægget beregnes af den nye varighed.
-- 6.4 Entydig regel: placeres direkte. Flere regler: lille valg med konkrete tidsrum. Ingen regel:
-  kort besked og mulighed for "Egne tider" – aldrig automatisk.
-- 6.5 Fælles klasse uden egen regel: kun hvis hvert hold har netop én regel med samme tidsrum
-  ("fælles tid for holdene"); ellers ingen regel.
+- 6.4 Tiden findes i denne rækkefølge, og klassen placeres direkte uden dialog:
+  1. holdets egen regel den dag i dagdelen;
+  2. fælles klasse: hvert hold har netop én regel med samme tidsrum ("fælles tid for holdene");
+  3. holdets egen tid i samme dagdel en anden dag (fx Hold 2's middagstid 11.50–13.05 på en ny dag);
+     har holdet flere, bevares klassens nuværende tidsrum, hvis det er et af dem, ellers det mest
+     almindelige;
+  4. dagdelens standardtid for ugedagen.
+  Kun hvis der er flere dokumenterede tider for holdet samme dag og dagdel, vises et lille valg.
+  Kun hvis alt mangler (ingen standardtid), bedes brugeren angive tiden.
+- 6.5 Standardtider pr. ugedag og dagdel udledes af dokumentet (mest almindelige tid den dag i
+  dagdelen; ellers i dagdelen hele ugen) og kan rettes under Indstillinger. Fredag og lørdag morgen
+  er 8.25–9.55.
 - 6.6 Annulleret placering efterlader klassen uændret.
 
-## 7. Specialklasser (Egne tider)
+## 7. Anden slags blok (Egne tider)
+
+- 7.0 Retter man tidspunktet på en klasse manuelt, bliver den en "anden slags" blok med egne tider.
+  Den kan sættes tilbage til automatisk tid fra redigeringen.
 
 - 7.1 Bevarer præcist sit tidsrum ved flytning til anden sal, dag, dagdel og lørdag. Den visuelle
   dagdel er uafhængig af klokkeslættet. Lørdagstillæg følger den nye dag.

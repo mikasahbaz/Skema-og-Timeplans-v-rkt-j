@@ -269,7 +269,7 @@ function BlockCard({ block, teachers, grid, conflict }: { block: Block; teachers
     >
       <div className="block-time">
         <span className="tabular">{formatRange(block.start, block.end)}</span>
-        {custom && <Icon name="lock" size={12} className="lock-icon" title="Egne tider" />}
+        {custom && <Icon name="lock" size={12} className="lock-icon" title="Anden slags · egne tider" />}
         {conflict && <Icon name="alert" size={13} className="warn-icon" title="Konflikt" />}
       </div>
       <div className="block-title">{block.title}</div>

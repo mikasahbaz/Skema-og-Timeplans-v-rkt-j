@@ -1457,6 +1457,35 @@ button.assembly:hover {
 .rule-table td:nth-child(5) .ct input {
   min-width: 120px;
 }
+.std-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.std-table .ct-clock input {
+  width: 76px;
+  min-height: 36px;
+}
+.time-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+.field-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.time-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
 .card {
   display: flex;
   flex-direction: column;

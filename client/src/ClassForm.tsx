@@ -1,10 +1,10 @@
 // Formular til en klasse: hold, lærer(e), titel – og kun ved "Egne tider" start/slut.
 // Bruges både af "Tilføj ny klasse" og når en placeret klasse redigeres.
 import { useMemo, useState } from 'react';
-import { resolveTime } from '../../shared/rules';
-import { DAY_NAMES, DEFAULT_TITLE, MAX_GROUPS_PER_BLOCK, MAX_TEACHERS_PER_BLOCK, PERIOD_NAMES, sameGroups, type AppData, type Block } from '../../shared/schema';
+import { resolveTime, type TimeSource } from '../../shared/rules';
+import { DEFAULT_TITLE, MAX_GROUPS_PER_BLOCK, MAX_TEACHERS_PER_BLOCK, sameGroups, type AppData, type Block } from '../../shared/schema';
 import { formatClock, formatDuration, formatRange, parseClock } from '../../shared/time';
-import { TeacherChip } from './ui';
+import { Icon, TeacherChip } from './ui';
 
 interface Props {
   data: AppData;
@@ -35,7 +35,11 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
   const start = parseClock(startText);
   const end = parseClock(endText);
   const groupsChanged = !sameGroups(groupIds, initial.groupIds);
-  const resolution = placed && !custom && groupIds.length ? resolveTime(data.timeRules, groupIds, initial.day, initial.period, groupsChanged ? ruleChoice : (ruleChoice ?? initial.ruleId)) : null;
+  // Automatisk tid for den placerede klasse (holdets regel, holdets tid andre dage eller dagdelens standardtid).
+  const auto = placed && groupIds.length
+    ? resolveTime(data, groupIds, initial.day, initial.period, groupsChanged ? { ruleId: ruleChoice } : { ruleId: ruleChoice ?? initial.ruleId, start: initial.start, end: initial.end })
+    : null;
+  const resolution = custom ? null : auto;
 
   const errors: string[] = [];
   if (!groupIds.length) errors.push('Vælg mindst ét hold');
@@ -46,7 +50,18 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
     if (end === null) errors.push('Skriv en sluttid, fx 9.55');
     if (start !== null && end !== null && end <= start) errors.push('Sluttid skal ligge efter starttid');
   } else if (resolution?.kind === 'choice' && !resolution.options.some((o) => o.id === ruleChoice)) errors.push('Vælg et af tidsrummene');
-  else if (resolution?.kind === 'none') errors.push('Der er ingen tidsregel her – vælg "Egne tider"');
+  else if (resolution?.kind === 'none') errors.push('Der er ingen tid for denne dagdel – skriv start og slut');
+
+  /** En manuel ændring af tiden gør klassen til en "anden slags" blok med egne tider. */
+  const goCustom = (startV: string | null, endV: string | null) => {
+    if (!custom) {
+      setStartText(resolution?.kind === 'single' ? formatClock(resolution.start) : '');
+      setEndText(resolution?.kind === 'single' ? formatClock(resolution.end) : '');
+      setCustom(true);
+    }
+    if (startV !== null) setStartText(startV);
+    if (endV !== null) setEndText(endV);
+  };
 
   const toggle = (list: string[], id: string, max: number) => (list.includes(id) ? list.filter((x) => x !== id) : list.length >= max ? list : [...list, id]);
 
@@ -131,50 +146,65 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
       </label>
 
       <div className="time-box">
-        <label className="check">
-          <input type="checkbox" checked={custom} onChange={(e) => setCustom(e.target.checked)} />
-          <span>Egne tider</span>
-        </label>
-        {custom ? (
+        {placed ? (
           <>
-            <div className="field-row">
-              <label className="field field-time">
-                <span>Start</span>
-                <input inputMode="numeric" value={startText} placeholder="9.10" onChange={(e) => setStartText(e.target.value)} onBlur={() => start !== null && setStartText(formatClock(start))} />
-              </label>
-              <label className="field field-time">
-                <span>Slut</span>
-                <input inputMode="numeric" value={endText} placeholder="9.55" onChange={(e) => setEndText(e.target.value)} onBlur={() => end !== null && setEndText(formatClock(end))} />
-              </label>
-              <div className="field">
-                <span>Varighed</span>
-                <strong className="tabular duration">{start !== null && end !== null && end > start ? formatDuration(end - start) : '—'}</strong>
-              </div>
+            <div className="time-head">
+              <span className="field-label">Tid</span>
+              {custom ? (
+                <span className="time-mode">
+                  <Icon name="lock" size={13} /> Anden slags · egne tider
+                </span>
+              ) : (
+                <span className="time-mode">Automatisk · {resolution?.kind === 'single' ? SOURCE_TEXT[resolution.source] : 'vælg tidsrum'}</span>
+              )}
             </div>
-            <span className="hint">Klassen beholder præcis dette tidsrum, også når den flyttes.</span>
+            {resolution?.kind === 'choice' ? (
+              <div className="choice-list" role="radiogroup" aria-label="Vælg tidsrum">
+                {resolution.options.map((o) => (
+                  <label key={o.id} className={`choice${ruleChoice === o.id ? ' choice-on' : ''}`}>
+                    <input type="radio" name="rule" checked={ruleChoice === o.id} onChange={() => setRuleChoice(o.id)} />
+                    <strong className="tabular">{formatRange(o.start, o.end)}</strong>
+                    {o.label && <span>{o.label}</span>}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <TimeFields
+                start={custom ? startText : resolution?.kind === 'single' ? formatClock(resolution.start) : ''}
+                end={custom ? endText : resolution?.kind === 'single' ? formatClock(resolution.end) : ''}
+                onStart={(v) => goCustom(v, null)}
+                onEnd={(v) => goCustom(null, v)}
+              />
+            )}
+            {custom ? (
+              <span className="hint">
+                Klassen beholder præcis dette tidsrum, også når den flyttes.{' '}
+                {auto?.kind === 'single' && (
+                  <button type="button" className="link-btn" onClick={() => setCustom(false)}>
+                    Brug automatisk tid ({formatRange(auto.start, auto.end)})
+                  </button>
+                )}
+              </span>
+            ) : (
+              <span className="hint">Retter du tidspunktet, bliver klassen en "anden slags" blok med egne tider.</span>
+            )}
           </>
-        ) : !placed ? (
-          <span className="hint">Tiden kommer fra tidstabellen, når du placerer klassen.</span>
-        ) : resolution?.kind === 'single' ? (
-          <span className="resolved">
-            <strong className="tabular">{formatRange(resolution.start, resolution.end)}</strong> · {resolution.derived ? 'fælles tid for holdene' : 'fra tidstabellen'}
-            {resolution.label && !resolution.derived ? ` (${resolution.label})` : ''}
-          </span>
-        ) : resolution?.kind === 'choice' ? (
-          <div className="choice-list" role="radiogroup" aria-label="Vælg tidsrum">
-            {resolution.options.map((o) => (
-              <label key={o.id} className={`choice${ruleChoice === o.id ? ' choice-on' : ''}`}>
-                <input type="radio" name="rule" checked={ruleChoice === o.id} onChange={() => setRuleChoice(o.id)} />
-                <strong className="tabular">{formatRange(o.start, o.end)}</strong>
-                {o.label && <span>{o.label}</span>}
-              </label>
-            ))}
-          </div>
-        ) : resolution?.kind === 'none' ? (
-          <span className="hint hint-warn">
-            Ingen tidsregel for dette hold {DAY_NAMES[initial.day].toLowerCase()} {PERIOD_NAMES[initial.period].toLowerCase()}.
-          </span>
-        ) : null}
+        ) : (
+          <>
+            <label className="check">
+              <input type="checkbox" checked={custom} onChange={(e) => setCustom(e.target.checked)} />
+              <span>Egne tider (anden slags blok)</span>
+            </label>
+            {custom ? (
+              <>
+                <TimeFields start={startText} end={endText} onStart={setStartText} onEnd={setEndText} />
+                <span className="hint">Klassen beholder præcis dette tidsrum, også når den flyttes.</span>
+              </>
+            ) : (
+              <span className="hint">Tiden kommer automatisk, når du placerer klassen.</span>
+            )}
+          </>
+        )}
       </div>
 
       {showNote ? (
@@ -205,5 +235,33 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
         </button>
       </div>
     </form>
+  );
+}
+
+const SOURCE_TEXT: Record<TimeSource, string> = {
+  rule: 'holdets tid i skemaet',
+  combined: 'fælles tid for holdene',
+  group: 'holdets tid fra en anden dag',
+  standard: 'dagdelens standardtid',
+};
+
+function TimeFields({ start, end, onStart, onEnd }: { start: string; end: string; onStart: (v: string) => void; onEnd: (v: string) => void }) {
+  const s = parseClock(start);
+  const e = parseClock(end);
+  return (
+    <div className="field-row">
+      <label className="field field-time">
+        <span>Start</span>
+        <input inputMode="numeric" value={start} placeholder="9.10" onChange={(ev) => onStart(ev.target.value)} onBlur={() => s !== null && onStart(formatClock(s))} />
+      </label>
+      <label className="field field-time">
+        <span>Slut</span>
+        <input inputMode="numeric" value={end} placeholder="9.55" onChange={(ev) => onEnd(ev.target.value)} onBlur={() => e !== null && onEnd(formatClock(e))} />
+      </label>
+      <div className="field">
+        <span>Varighed</span>
+        <strong className="tabular duration">{s !== null && e !== null && e > s ? formatDuration(e - s) : '—'}</strong>
+      </div>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 // Skolens skemadokument som kilde: afledte tidsregler, morgensamling, hold og (valgfrit) ugeskema.
 // Kilden er arket "KDS" i Balletskole_Skema_26_27_Master_fra_uge_43 (bekræftet af skolen).
 import { nextTeacherColor } from '../colors.js';
+import { deriveStandardTimes } from '../rules.js';
 import { DEFAULT_TITLE, FRIDAY, type AppData, type Assembly, type Block, type Group, type Teacher, type TimeRule } from '../schema.js';
 import { SOURCE } from './kds.js';
 
@@ -107,7 +108,8 @@ export function sourceAssembly(idByName: Map<string, string>): Assembly {
 /** Tilføjer kildens hold, tidsregler og morgensamling til data (uden at røre klasser og lærere). */
 export function withSourceRules(data: AppData): AppData {
   const { groups, idByName } = ensureSourceGroups(data.groups);
-  return { ...data, groups, timeRules: sourceRules(idByName), settings: { ...data.settings, assembly: sourceAssembly(idByName) } };
+  const timeRules = sourceRules(idByName);
+  return { ...data, groups, timeRules, settings: { ...data.settings, assembly: sourceAssembly(idByName), standardTimes: deriveStandardTimes(timeRules) } };
 }
 
 /**

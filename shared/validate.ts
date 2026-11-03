@@ -22,7 +22,7 @@ function duplicates<T>(items: T[], key: (t: T) => string): string[] {
   return [...dup];
 }
 
-type Refs = Pick<AppData, 'teachers' | 'groups' | 'rooms' | 'timeRules'>;
+type Refs = Pick<AppData, 'teachers' | 'groups' | 'rooms' | 'timeRules'> & { settings: Pick<AppData['settings'], 'standardTimes'> };
 
 /** Regler for én klasse, givet referencedata. Returnerer danske fejlbeskeder. */
 export function validateBlock(block: Block, data: Refs): string[] {
@@ -37,7 +37,7 @@ export function validateBlock(block: Block, data: Refs): string[] {
   if (!data.rooms.some((r) => r.id === block.roomId)) errors.push('Vælg en sal');
   for (const t of block.teacherIds) if (!data.teachers.some((x) => x.id === t)) errors.push('En valgt lærer findes ikke');
   if (block.timeMode === 'custom' && block.ruleId !== null) errors.push('En klasse med egne tider kan ikke have en tidsregel');
-  if (block.timeMode === 'rule' && !blockMatchesRules(data.timeRules, block)) errors.push('Klassens tid stemmer ikke med tidstabellen');
+  if (block.timeMode === 'rule' && !blockMatchesRules(data, block)) errors.push('Klassens tid stemmer ikke med tidstabellen');
   return [...new Set(errors)];
 }
 
@@ -79,6 +79,11 @@ export function validateAppData(input: unknown): ValidationResult {
     for (const e of validateRule(rule, data)) errors.push(`Tidsregel ${rule.id}: ${e}`);
     if (errors.length > 50) break;
   }
+  data.settings.standardTimes.forEach((row, d) =>
+    row.forEach((slot, p) => {
+      if (slot && !(slot.end > slot.start)) errors.push(`Standardtid ${d}/${p}: sluttid skal ligge efter starttid`);
+    }),
+  );
   const a = data.settings.assembly;
   if (a.enabled && !(a.end > a.start)) errors.push('Morgensamlingen: sluttid skal ligge efter starttid');
   if (a.teacherId && !data.teachers.some((t) => t.id === a.teacherId)) errors.push('Morgensamlingen: den valgte lærer findes ikke');

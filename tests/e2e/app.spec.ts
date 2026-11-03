@@ -160,27 +160,54 @@ test('8) fælles klasse med to hold og to lærere: én blok, begge lærere får 
   }
 });
 
-test('9) manglende regel opfinder ikke en tid: annuller bevarer, "Egne tider" er et aktivt valg; flere muligheder giver et valg', async ({ page, request }) => {
+test('9) flytning giver altid en tid: holdets egen tid fra en anden dag eller dagdelens standardtid; manuel rettelse gør blokken til "anden slags"', async ({ page, request }) => {
+  const d = fixture();
+  const H2 = g('Hold 2');
+  d.blocks = [ruleBlock(d, { groupIds: [H2], day: 0, period: 2, teacherIds: ['co'] })]; // Hold 2 mandag middag 11.50–13.05 (KDS!P6)
+  await resetData(request, d);
+  await loginAdmin(page);
+  await expect(blockEl(page, 'b1')).toContainText('11.50–13.05');
+  // Tirsdag middag: Hold 2 har ingen tid den dag i arket → holdets middagstid
+  await moveVia(page, blockEl(page, 'b1'), cell(page, 1, 2, 'room-2'));
+  await expect(cell(page, 1, 2, 'room-2').locator('.block')).toContainText('11.50–13.05');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // Tirsdag eftermiddag: Hold 2 har ingen eftermiddagstid → dagdelens standardtid 16.50–18.00
+  await dragTo(page, blockEl(page, 'b1'), cell(page, 1, 3, 'room-2'));
+  await expect(cell(page, 1, 3, 'room-2').locator('.block')).toContainText('16.50–18.00');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // Manuel rettelse → anden slags blok med egne tider, som bevares ved flytning
+  await blockEl(page, 'b1').click();
+  await page.getByRole('button', { name: 'Redigér' }).click();
+  const form = page.getByRole('dialog', { name: 'Redigér klasse' });
+  await expect(form).toContainText('Automatisk');
+  await form.getByLabel('Start').fill('16.30');
+  await expect(form).toContainText('Anden slags');
+  await form.getByRole('button', { name: 'Gem' }).click();
+  await expect(blockEl(page, 'b1')).toContainText('16.30–18.00');
+  await expect(blockEl(page, 'b1').locator('.lock-icon')).toHaveCount(1);
+  await moveVia(page, blockEl(page, 'b1'), cell(page, 3, 0, 'room-4'));
+  await expect(cell(page, 3, 0, 'room-4').locator('.block')).toContainText('16.30–18.00');
+});
+
+test('flere dokumenterede tidsrum samme sted giver et lille valg', async ({ page, request }) => {
   const d = fixture([]);
   d.blocks = [ruleBlock(d, { groupIds: [H6], day: 0, period: 0 })];
-  // To varianter for Hold 6 onsdag middag (manuelle regler til testen)
   d.timeRules.push(
     { id: 'x1', groupIds: [H6], day: 2, period: 2, start: 710, end: 755, label: 'A', note: '', source: 'Manuel' },
     { id: 'x2', groupIds: [H6], day: 2, period: 2, start: 730, end: 800, label: 'B', note: '', source: 'Manuel' },
   );
   await resetData(request, d);
   await loginAdmin(page);
-  await dragTo(page, blockEl(page, 'b1'), cell(page, 1, 1, 'room-2')); // tirsdag formiddag: ingen regel for Hold 6
-  const none = page.getByRole('dialog', { name: 'Ingen tidsregel' });
-  await expect(none).toBeVisible();
-  await none.getByRole('button', { name: 'Annuller' }).click();
-  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('08.10–09.55');
   await moveVia(page, blockEl(page, 'b1'), cell(page, 2, 2, 'room-2'));
   const choice = page.getByRole('dialog', { name: 'Vælg tidsrum' });
   await expect(choice.getByRole('button')).toHaveCount(3); // to tidsrum + annuller
-  await choice.getByRole('button', { name: /12\.10–13\.20/ }).click();
+  await choice.getByRole('button', { name: 'Annuller' }).click();
+  await expect(cell(page, 0, 0, 'room-1').locator('.block')).toContainText('08.10–09.55');
+  // Annuller bevarer klassen; man er stadig i "Flyt" og kan vælge en celle igen.
+  await expect(page.locator('.place-bar')).toBeVisible();
+  await cell(page, 2, 2, 'room-2').locator('.place-target').click();
+  await page.getByRole('dialog', { name: 'Vælg tidsrum' }).getByRole('button', { name: /12\.10–13\.20/ }).click();
   await expect(cell(page, 2, 2, 'room-2').locator('.block')).toContainText('12.10–13.20');
-  await expect(cell(page, 2, 2, 'room-2').locator('.lock-icon')).toHaveCount(0);
 });
 
 test('konflikt: annuller bevarer, "Behold med konflikt" markerer og tæller med', async ({ page, request }) => {

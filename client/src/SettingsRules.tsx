@@ -19,7 +19,7 @@ export interface RulesProps {
   onReloadSourceRules: () => void;
 }
 
-type Tab = 'rules' | 'coverage' | 'assembly' | 'source';
+type Tab = 'rules' | 'standard' | 'coverage' | 'assembly' | 'source';
 
 export function RulesSection(p: RulesProps) {
   const [tab, setTab] = useState<Tab>('rules');
@@ -31,12 +31,14 @@ export function RulesSection(p: RulesProps) {
         onChange={setTab}
         options={[
           ['rules', 'Tidsregler'],
+          ['standard', 'Standardtider'],
           ['coverage', 'Dækning'],
           ['assembly', 'Morgensamling'],
           ['source', 'Kilde'],
         ]}
       />
       {tab === 'rules' && <RuleTable {...p} />}
+      {tab === 'standard' && <StandardTimesTable {...p} />}
       {tab === 'coverage' && <Coverage data={p.data} />}
       {tab === 'assembly' && <AssemblySettings {...p} />}
       {tab === 'source' && <SourceInfo {...p} />}
@@ -52,8 +54,8 @@ function RuleTable({ data, onRules }: RulesProps) {
   return (
     <div>
       <p className="hint">
-        En almindelig klasse får sin tid herfra ud fra hold, ugedag og dagdel. Ændrer du et tidsrum, opdateres alle klasser, der bruger det –
-        klasser med egne tider røres ikke. Mangler en regel, kan klassen få egne tider.
+        En klasse får holdets tid herfra ud fra ugedag og dagdel. Har holdet ingen tid den dag, bruges holdets tid i samme dagdel en anden
+        dag, ellers dagdelens standardtid. Ændrer du et tidsrum, opdateres alle klasser, der bruger det – klasser med egne tider røres ikke.
       </p>
       <label className="field field-inline">
         <span>Vis hold</span>
@@ -231,14 +233,70 @@ function AddRule({ data, onRules }: { data: AppData; onRules: RulesProps['onRule
   );
 }
 
+function StandardTimesTable({ data, onRules }: RulesProps) {
+  const std = data.settings.standardTimes;
+  const set = (day: number, period: number, slot: { start: number; end: number } | null, what: string) => {
+    if (slot && slot.end <= slot.start) return ['Sluttid skal ligge efter starttid'];
+    return cleanErrors(onRules(`${what}: ${DAY_SHORT[day].toLowerCase()} ${PERIOD_NAMES[period].toLowerCase()}`, ops.updateStandardTime(data, day, period, slot)));
+  };
+  return (
+    <div>
+      <p className="hint">
+        Bruges, når et hold ikke har sin egen tid i dagdelen – så en klasse altid får et tidspunkt, når den flyttes. Udledt af skemadokumentet
+        (den mest almindelige tid den dag i dagdelen). Ændrer du en standardtid, opdateres de klasser, der bruger den.
+      </p>
+      <div className="table-scroll">
+        <table className="table std-table">
+          <thead>
+            <tr>
+              <th>Dag</th>
+              {PERIOD_NAMES.map((p) => (
+                <th key={p}>{p}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {DAY_NAMES.map((dayName, day) => (
+              <tr key={dayName}>
+                <th scope="row">{dayName}</th>
+                {PERIOD_NAMES.map((pName, period) => {
+                  const slot = std[day][period];
+                  const label = `${dayName} ${pName.toLowerCase()}`;
+                  return (
+                    <td key={pName}>
+                      {slot ? (
+                        <div className="std-slot">
+                          <CommitClock value={slot.start} label={`Standard start ${label}`} onCommit={(m) => set(day, period, { ...slot, start: m }, 'Ændr standardtid')} />
+                          <CommitClock value={slot.end} label={`Standard slut ${label}`} onCommit={(m) => set(day, period, { ...slot, end: m }, 'Ændr standardtid')} />
+                        </div>
+                      ) : (
+                        <button className="btn btn-sm" onClick={() => set(day, period, { start: 600, end: 645 }, 'Tilføj standardtid')}>
+                          Tilføj
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button className="btn" onClick={() => onRules('Udled standardtider fra tidstabellen', ops.resetStandardTimes(data))}>
+        Udled igen fra tidstabellen
+      </button>
+    </div>
+  );
+}
+
 function Coverage({ data }: { data: AppData }) {
   const rows = coverage(data);
   const short = ['Mo', 'Fo', 'Mi', 'Ef'];
   return (
     <div>
       <p className="hint">
-        Viser, hvor hvert hold har en tidsregel (Mo = morgen, Fo = formiddag, Mi = middag, Ef = eftermiddag). Et tomt felt betyder, at kilden
-        ikke angiver en tid – ikke at holdet ikke må undervises dér. Fælles klasser for flere hold har egne regler og vises ikke her.
+        Viser, hvor hvert hold har sin egen tid i skemadokumentet (Mo = morgen, Fo = formiddag, Mi = middag, Ef = eftermiddag). Andre steder får
+        holdet sin tid fra en anden dag eller dagdelens standardtid. Fælles klasser for flere hold vises ikke her.
       </p>
       <div className="table-scroll">
         <table className="table coverage">

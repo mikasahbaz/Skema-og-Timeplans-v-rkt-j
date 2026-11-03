@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { computeAllSummaries } from '../../shared/calc';
 import { allConflicts, conflictsForBlock, type Conflict } from '../../shared/conflicts';
+import { resolveBlock } from '../../shared/rules';
 import { newId } from '../../shared/ids';
 import { DAY_NAMES, DEFAULT_TITLE, PERIOD_NAMES, type AppData, type Block, type TimeRule } from '../../shared/schema';
 import { sourceWeek, withSourceRules } from '../../shared/source/index';
@@ -168,7 +169,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     const out = ops.placeBlock(data, block, cell);
     if (out.kind === 'ok') return `${formatRange(out.block.start, out.block.end)}${block.timeMode === 'custom' ? ' · egne tider' : ''}`;
     if (out.kind === 'choice') return `${out.options.length} tidsrum – vælg`;
-    return 'Ingen tidsregel';
+    return 'Angiv tid';
   };
 
   const startPlacement = (mode: 'move' | 'copy', block: Block) => {
@@ -594,7 +595,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
       )}
 
       {pending && (
-        <Anchored anchor={pending.rect} onClose={() => setPending(null)} label={pending.kind === 'choice' ? 'Vælg tidsrum' : 'Ingen tidsregel'} width={360}>
+        <Anchored anchor={pending.rect} onClose={() => setPending(null)} label={pending.kind === 'choice' ? 'Vælg tidsrum' : 'Ingen tid for dagdelen'} width={360}>
           <PendingPanel
             pending={pending}
             data={data}
@@ -682,6 +683,7 @@ function BlockInfo({ block, data, onEdit, onMove, onCopy, onDelete }: { block: B
   const [confirmDelete, setConfirmDelete] = useState(false);
   const teachers = block.teacherIds.map((id) => data.teachers.find((t) => t.id === id));
   const rule = block.ruleId ? data.timeRules.find((r) => r.id === block.ruleId) : null;
+  const res = block.timeMode === 'rule' ? resolveBlock(data, block) : null;
   return (
     <div className="panel">
       <h2 className="panel-title">{block.title}</h2>
@@ -718,12 +720,14 @@ function BlockInfo({ block, data, onEdit, onMove, onCopy, onDelete }: { block: B
           <dd>
             {block.timeMode === 'custom' ? (
               <>
-                <Icon name="lock" size={14} /> Egne tider – følger klassen ved flytning
+                <Icon name="lock" size={14} /> Anden slags · egne tider, som følger klassen ved flytning
               </>
             ) : rule ? (
-              `Fra tidstabellen${rule.label ? ` (${rule.label})` : ''} · ${rule.source || 'manuel'}`
+              `Automatisk: holdets tid i skemaet${rule.label ? ` (${rule.label})` : ''} · ${rule.source || 'manuel'}`
+            ) : res?.kind === 'single' ? (
+              `Automatisk: ${res.label.charAt(0).toLowerCase()}${res.label.slice(1)}`
             ) : (
-              'Fælles tid for holdene'
+              'Automatisk'
             )}
           </dd>
         </div>
@@ -791,8 +795,8 @@ function PendingPanel({ pending, data, onPick, onCustom, onCancel }: { pending: 
         </>
       ) : (
         <>
-          <h2 className="panel-title">Ingen tidsregel</h2>
-          <p>Der er ingen tid i tidstabellen for {where}.</p>
+          <h2 className="panel-title">Ingen tid for dagdelen</h2>
+          <p>Der er hverken en tid for {where} eller en standardtid for dagdelen. Angiv tiden selv, eller sæt en standardtid under tandhjulet.</p>
           {custom ? (
             <>
               <div className="field-row">

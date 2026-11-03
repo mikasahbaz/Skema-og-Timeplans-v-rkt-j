@@ -1,11 +1,15 @@
 # WORK_STATUS
 
-Opdateret: 2. november 2026 (version 2: enklere skematavle og automatiske tider fra KDS-arket).
+Opdateret: 3. november 2026 (version 2 + automatisk tid ved alle flytninger og "anden slags" blokke).
 
 ## Verificeret status
 
 - `npm run typecheck` og `npm run build` er rene.
-- `npm test`: 51 enheds- og API-tests består. De dækker:
+- 3. nov.: En flytning giver aldrig "ingen tidsregel" længere. Tiden kommer fra holdets egen tid
+  samme dag, holdets tid i samme dagdel en anden dag eller dagdelens standardtid (redigerbar).
+  En manuel rettelse af tiden gør klassen til en "anden slags" blok med egne tider.
+  Datamodellen er version 3 (standardtider) og migreres automatisk.
+- `npm test`: 55 enheds- og API-tests består. De dækker:
   - eksempel A–D
   - fælles klasser uden dobbelttælling
   - morgensamlingens timer og forberedelse
@@ -17,7 +21,7 @@ Opdateret: 2. november 2026 (version 2: enklere skematavle og automatiske tider 
   - migrering fra version 1, også ved serverstart og ved import
   - konflikter med morgensamlingen
   - adgang, versionskontrol, backup og sikkerhed
-- `npm run test:e2e`: 14 Playwright-tests i Chromium består. De dækker SPEC.md's kontrolpunkter 1–13
+- `npm run test:e2e`: 15 Playwright-tests i Chromium består. De dækker SPEC.md's kontrolpunkter 1–13
   plus konflikter, ændret tidsregel, lagringsfejl, forældet vindue, læseadgang og en tæt uge
   (67 klasser fra kilden).
 - Skærmbilleder er gennemset ved 1440×900, 1366×768, iPad vandret 1180×820 (touch) og 390 px.

@@ -13,7 +13,7 @@ export const ROOM_COUNT = 8;
 export const PERIOD_COUNT = 4; // Morgen, Formiddag, Middag, Eftermiddag (som i skemadokumentet)
 export const MAX_TEACHERS_PER_BLOCK = 2;
 export const MAX_GROUPS_PER_BLOCK = 4;
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const DEFAULT_TITLE = 'Balletklasse';
 
 const id = z.string().trim().min(1, 'Mangler id').max(80);
@@ -101,12 +101,17 @@ export const assemblySchema = z.object({
   source: z.string().trim().max(300).default(''),
 });
 
+const slotSchema = z.object({ start: minutes('Starttid'), end: minutes('Sluttid') }).nullable();
+/** Standardtid pr. ugedag (6) og dagdel (4); null = ingen standardtid. */
+export const standardTimesSchema = z.array(z.array(slotSchema).length(PERIOD_COUNT)).length(DAY_COUNT);
+
 export const settingsSchema = z.object({
   prepPercent: nullableNumber(0, 1000, 'Forberedelsesprocent'),
   saturdayPercent: nullableNumber(0, 1000, 'Lørdagstillæg'),
   prepBasis: z.enum(['actual', 'withSaturday']),
   teachingWeeks: nullableNumber(0, 60, 'Undervisningsuger'),
   assembly: assemblySchema,
+  standardTimes: standardTimesSchema,
 });
 
 export const appDataSchema = z.object({
@@ -129,6 +134,9 @@ export type Settings = z.infer<typeof settingsSchema>;
 export type AppData = z.infer<typeof appDataSchema>;
 export type PrepBasis = Settings['prepBasis'];
 export type TimeMode = Block['timeMode'];
+export type StandardTimes = z.infer<typeof standardTimesSchema>;
+
+export const emptyStandardTimes = (): StandardTimes => Array.from({ length: DAY_COUNT }, () => Array.from({ length: PERIOD_COUNT }, () => null));
 
 export const DAY_NAMES = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'] as const;
 export const DAY_SHORT = ['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør'] as const;
@@ -154,6 +162,7 @@ export const DEFAULT_SETTINGS: Settings = {
   prepBasis: 'actual',
   teachingWeeks: null,
   assembly: EMPTY_ASSEMBLY,
+  standardTimes: Array.from({ length: DAY_COUNT }, () => Array.from({ length: PERIOD_COUNT }, () => null)),
 };
 
 export function defaultRooms(): Room[] {
@@ -171,7 +180,7 @@ export function emptyAppData(): AppData {
     rooms: defaultRooms(),
     timeRules: [],
     blocks: [],
-    settings: { ...DEFAULT_SETTINGS, assembly: { ...EMPTY_ASSEMBLY, groupIds: [] } },
+    settings: { ...DEFAULT_SETTINGS, assembly: { ...EMPTY_ASSEMBLY, groupIds: [] }, standardTimes: emptyStandardTimes() },
   };
 }
 

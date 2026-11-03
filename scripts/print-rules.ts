@@ -16,6 +16,11 @@ for (let day = 0; day < 6; day++) {
     md += `| ${PERIOD_NAMES[r.period]} | ${r.groupIds.map(name).join(' + ')} | ${formatRange(r.start, r.end)} | ${r.label || '–'} | ${r.source}${r.note ? ' (÷ p)' : ''} |\n`;
   md += '\n';
 }
+md += `## Standardtider (bruges, når holdet ikke har sin egen tid i dagdelen)\n\n| Dag | ${PERIOD_NAMES.join(' | ')} |\n|---|---|---|---|---|\n`;
+d.settings.standardTimes.forEach((row, day) => {
+  md += `| ${DAY_NAMES[day]} | ${row.map((s) => (s ? formatRange(s.start, s.end) : '–')).join(' | ')} |\n`;
+});
+md += '\n';
 md += `## Morgensamling\n\n${DAY_NAMES[a.day]} ${formatRange(a.start, a.end)} · ${a.groupIds.map(name).join(', ')} · ${a.location} · kilde ${a.source}\n\n## Spørgsmål og usikkerheder\n\n`;
 for (const i of SOURCE_ISSUES) md += `- **${i.ref}:** ${i.text}\n`;
 writeFileSync('docs/tidstabel-kds.md', md);

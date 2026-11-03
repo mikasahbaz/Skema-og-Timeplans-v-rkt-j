@@ -19,13 +19,24 @@ describe('tidsregler', () => {
     rule({ id: 'h4mon', groupIds: ['h4'], day: 0, period: 0, start: 490, end: 595 }),
   ];
   it('entydig regel, flere muligheder og ingen regel', () => {
-    expect(resolveTime(d.timeRules, ['h3'], 0, 0)).toMatchObject({ kind: 'single', start: 490, end: 595, ruleId: 'mon' });
-    expect(resolveTime(d.timeRules, ['h3'], 1, 1).kind).toBe('choice');
-    expect(resolveTime(d.timeRules, ['h3'], 2, 0).kind).toBe('none');
+    expect(resolveTime(d, ['h3'], 0, 0)).toMatchObject({ kind: 'single', start: 490, end: 595, ruleId: 'mon' });
+    expect(resolveTime(d, ['h3'], 1, 1).kind).toBe('choice');
+    expect(resolveTime(d, ['h3'], 2, 3).kind).toBe('none'); // ingen regel, ingen holdtid, ingen standardtid
   });
   it('fælles klasse: kun når hvert hold har samme dokumenterede tid', () => {
-    expect(resolveTime(d.timeRules, ['h3', 'h4'], 0, 0)).toMatchObject({ kind: 'single', start: 490, end: 595, derived: true, ruleId: null });
-    expect(resolveTime(d.timeRules, ['h3', 'h4'], 4, 0).kind).toBe('none');
+    expect(resolveTime(d, ['h3', 'h4'], 0, 0)).toMatchObject({ kind: 'single', start: 490, end: 595, source: 'combined', ruleId: null });
+    expect(resolveTime(d, ['h3', 'h4'], 4, 0).kind).toBe('none');
+  });
+  it('holdets egen tid fra en anden dag bruges, og klassens nuværende tidsrum foretrækkes', () => {
+    // Onsdag morgen har Hold 3 ingen regel: mest almindelige morgentid for holdet er 08.25–09.55 (fre + lør)
+    expect(resolveTime(d, ['h3'], 2, 0)).toMatchObject({ kind: 'single', start: 505, end: 595, source: 'group', ruleId: null });
+    expect(resolveTime(d, ['h3'], 2, 0, { start: 490, end: 595 })).toMatchObject({ start: 490, end: 595, source: 'group' });
+  });
+  it('dagdelens standardtid bruges, når holdet ingen tid har i dagdelen', () => {
+    const std = { ...d, settings: { ...d.settings, standardTimes: d.settings.standardTimes.map((row) => row.map(() => ({ start: 1010, end: 1080 }))) } };
+    expect(resolveTime(std, ['h3'], 2, 3)).toMatchObject({ kind: 'single', start: 1010, end: 1080, source: 'standard' });
+    const b = block({ timeMode: 'rule', ruleId: 'mon', start: 490, end: 595 });
+    expect(placeBlock({ ...std, blocks: [b] }, b, { day: 2, period: 3, roomId: 'room-1' })).toMatchObject({ kind: 'ok', block: { start: 1010, end: 1080, timeMode: 'rule', ruleId: null } });
   });
   it('flytning til anden dag ændrer tid og varighed; fredag har sine morgentider; optælling følger', () => {
     const b = block({ timeMode: 'rule', ruleId: 'mon', start: 490, end: 595 });
@@ -78,7 +89,7 @@ describe('kilden (KDS-arket)', () => {
   const d = demoAppData();
   const g = (name: string) => d.groups.find((x) => x.name === name)!.id;
   const times = (name: string[], day: number, period: number) => {
-    const r = resolveTime(d.timeRules, name.map(g), day, period);
+    const r = resolveTime(d, name.map(g), day, period);
     return r.kind === 'single' ? [r.start, r.end] : r.kind;
   };
   it('udtrækker de dokumenterede tider pr. ugedag', () => {
@@ -93,8 +104,10 @@ describe('kilden (KDS-arket)', () => {
     expect(times(['Hold 8', 'Hold 9'], 5, 1)).toEqual([610, 705]); // KDS!D35 fælles 10.10-11.45
     expect(times(['Kompagni B'], 5, 2)).toEqual([735, 900]); // KDS!D36 12.15-15.00
   });
-  it('opfinder ikke tider: tomme celler og eksemplet Hold 9 kl. 09.10–09.55 findes ikke', () => {
-    expect(times(['Hold 6'], 1, 1)).toBe('none');
+  it('opfinder ikke tider: eksemplet Hold 9 kl. 09.10–09.55 findes ikke; tomme celler giver holdets egen tid', () => {
+    expect(times(['Hold 6'], 1, 1)).toEqual([610, 655]); // Hold 6 formiddag (fredag KDS!B29)
+    expect(times(['Hold 2'], 1, 2)).toEqual([710, 785]); // Hold 2's middagstid på en ny dag
+    expect(times(['Hold 2'], 1, 3)).toEqual([1010, 1080]); // standardtid tirsdag eftermiddag
     expect(d.timeRules.some((r) => r.start === 550 && r.end === 595)).toBe(false);
     expect(d.groups.some((x) => x.name === 'Hold 1')).toBe(false);
   });
@@ -102,6 +115,15 @@ describe('kilden (KDS-arket)', () => {
     const one2one = d.timeRules.filter((r) => r.groupIds.join() === g('One2One') && r.day === 0 && r.period === 1);
     expect(one2one).toHaveLength(1);
     expect(one2one[0].source).toBe('KDS!N5, KDS!P5');
+  });
+  it('standardtider pr. dag og dagdel udledes af dokumentet', () => {
+    const st = d.settings.standardTimes;
+    expect(st[0][0]).toEqual({ start: 490, end: 595 }); // man morgen 8.10–9.55
+    expect(st[4][0]).toEqual({ start: 505, end: 595 }); // fre morgen 8.25–9.55
+    expect(st[5][0]).toEqual({ start: 505, end: 595 }); // lør morgen
+    expect(st[1][1]).toEqual({ start: 610, end: 655 }); // tir formiddag 10.10–10.55
+    expect(st[1][2]).toEqual({ start: 710, end: 785 }); // tir middag (ingen den dag → ugens mest almindelige)
+    expect(st[0][3]).toEqual({ start: 1010, end: 1080 }); // man eftermiddag 16.50–18.00
   });
   it('morgensamlingen: fredag 8.10–8.20, Hold 3–9, Malersalen, ingen lærer forvalgt', () => {
     const a = d.settings.assembly;

@@ -82,12 +82,15 @@ Hovedskærmen har kun skemaet, timeoptællingen, **Tilføj ny klasse** og tandhj
 1. **Tilføj ny klasse**: vælg hold (ét eller flere), lærer(e) og evt. titel (standard
    "Balletklasse"). Tryk **Opret og placér**, og tryk derefter på en celle eller træk kortet derhen.
    Du kan også trykke direkte på en tom celle.
-2. **Tiden kommer automatisk** fra tidstabellen (hold + ugedag + dagdel). Har tabellen flere tider,
-   vælger du blandt dem; har den ingen, kan du give klassen **Egne tider**.
+2. **Tiden kommer automatisk**, også når du flytter klassen til et sted, den ikke har været før:
+   holdets tid den dag i skemadokumentet, ellers holdets tid i samme dagdel en anden dag, ellers
+   dagdelens standardtid. Standardtiderne kan rettes under tandhjulet.
 3. **Flyt** en klasse ved at trække den (på iPad: hold fingeren et øjeblik). Under træk viser den
    løftede klasse den tid, den får i cellen. Alt+træk kopierer. Tryk på en klasse for at redigere,
    flytte, kopiere eller slette den.
-4. **Egne tider** (låsesymbol) bevarer præcis sit klokkeslæt, uanset hvor klassen flyttes.
+4. **Retter du tidspunktet** på en klasse, bliver den en "anden slags" blok med egne tider
+   (låsesymbol), som bevarer præcis sit klokkeslæt, uanset hvor den flyttes. Den kan sættes tilbage
+   til automatisk tid i redigeringen.
 5. **Timer pr. uge** til højre: tryk på en lærer for undervisning, forberedelse og lørdagstillæg.
 6. **Tandhjulet** samler alt andet: lærere og hold, tidsregler og morgensamling, satser og
    årsarbejdstid med detaljeret opgørelse, fortryd/gentag, konflikter, backup og læsevisning.

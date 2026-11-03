@@ -36,4 +36,14 @@ describe('migrering fra version 1', () => {
   it('lader et dokument i den aktuelle version være', () => {
     expect(migrateAny(d).report).toBeNull();
   });
+  it('version 2 får standardtider uden at ændre klasserne', () => {
+    const { standardTimes: _, ...settings } = d.settings;
+    const v2 = { ...d, schemaVersion: 2, settings };
+    const r = migrateAny(v2);
+    const m = r.data as AppData;
+    expect(validateAppData(m).errors).toEqual([]);
+    expect(m.blocks).toEqual(d.blocks);
+    expect(m.settings.standardTimes[0][0]).toEqual({ start: 490, end: 595 });
+    expect(r.report?.from).toBe(2);
+  });
 });

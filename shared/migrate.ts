@@ -3,7 +3,8 @@
 // - Kildens hold, tidsregler og morgensamling tilføjes (eksisterende hold matches på navn).
 // - En klasse, der præcis matcher en tidsregel (hold, dag og tidsrum), knyttes til reglen.
 // - Alle andre klasser beholder deres tider som "Egne tider"; dagdelen sættes ud fra klokkeslættet.
-import { sameGroups, SCHEMA_VERSION, type AppData, type Block } from './schema.js';
+import { deriveStandardTimes } from './rules.js';
+import { emptyStandardTimes, sameGroups, SCHEMA_VERSION, type AppData, type Block } from './schema.js';
 import { withSourceRules } from './source/index.js';
 import { periodForClock } from './time.js';
 
@@ -38,6 +39,7 @@ export function migrateV1(old: V1): { data: AppData; report: MigrationReport } {
       prepBasis: old.settings.prepBasis,
       teachingWeeks: old.settings.teachingWeeks,
       assembly: { enabled: false, day: 4, start: 490, end: 500, groupIds: [], location: '', teacherId: null, prepMode: 'same', prepPercent: null, source: '' },
+      standardTimes: emptyStandardTimes(),
     },
   });
   let matched = 0;
@@ -64,14 +66,24 @@ export function migrateV1(old: V1): { data: AppData; report: MigrationReport } {
   return { data: { ...base, blocks }, report: { from: 1, matched, custom: blocks.length - matched } };
 }
 
+/** Version 2 → 3: standardtider pr. ugedag og dagdel udledes af tidstabellen. Intet andet ændres. */
+export function migrateV2(old: Omit<AppData, 'schemaVersion' | 'settings'> & { schemaVersion: 2; settings: Omit<AppData['settings'], 'standardTimes'> }): {
+  data: AppData;
+  report: MigrationReport;
+} {
+  const data: AppData = { ...old, schemaVersion: SCHEMA_VERSION, settings: { ...old.settings, standardTimes: deriveStandardTimes(old.timeRules) } };
+  const ruleBlocks = data.blocks.filter((b) => b.timeMode === 'rule').length;
+  return { data, report: { from: 2, matched: ruleBlocks, custom: data.blocks.length - ruleBlocks } };
+}
+
 /** Bringer et vilkårligt gemt eller importeret dokument op på den aktuelle version. */
 export function migrateAny(input: unknown): { data: unknown; report: MigrationReport | null } {
-  if (input && typeof input === 'object' && (input as { schemaVersion?: unknown }).schemaVersion === 1) {
-    try {
-      return migrateV1(input as V1);
-    } catch {
-      return { data: input, report: null };
-    }
+  const version = input && typeof input === 'object' ? (input as { schemaVersion?: unknown }).schemaVersion : undefined;
+  try {
+    if (version === 1) return migrateV1(input as V1);
+    if (version === 2) return migrateV2(input as Parameters<typeof migrateV2>[0]);
+  } catch {
+    /* ugyldigt dokument – valideringen giver en forståelig fejl */
   }
   return { data: input, report: null };
 }

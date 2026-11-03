@@ -75,7 +75,7 @@ export function DayList({
                 <div className="dl-main">
                   <div className="block-title">
                     {b.title}
-                    {b.timeMode === 'custom' && <Icon name="lock" size={12} className="lock-icon" title="Egne tider" />}
+                    {b.timeMode === 'custom' && <Icon name="lock" size={12} className="lock-icon" title="Anden slags · egne tider" />}
                   </div>
                   <div className="block-meta">
                     <span>

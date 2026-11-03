@@ -224,7 +224,7 @@ describe('API', () => {
     const { cookie } = await login(base);
     const s = await (await fetch(`${base}/api/data`, { headers: { cookie } })).json();
     expect(s.version).toBe(8);
-    expect(s.data.schemaVersion).toBe(2);
+    expect(s.data.schemaVersion).toBe(3);
     expect(s.data.blocks[0]).toMatchObject({ id: 'b1', title: 'Klassisk ballet', groupIds: ['g6'], timeMode: 'rule' });
     expect(s.data.timeRules.length).toBeGreaterThan(50);
     const revs = await (await fetch(`${base}/api/revisions`, { headers: { cookie } })).json();

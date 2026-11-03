@@ -1,7 +1,7 @@
 // Rene funktioner, der laver en ny AppData ud fra en handling. Ingen sideeffekter.
 import { nextTeacherColor } from '../../shared/colors';
 import { newId } from '../../shared/ids';
-import { recomputeRuleBlocks, resolveTime, type Target } from '../../shared/rules';
+import { deriveStandardTimes, recomputeRuleBlocks, resolveTime, type Target, type TimeSource } from '../../shared/rules';
 import type { AppData, Block, Group, Room, Settings, Teacher, TimeRule } from '../../shared/schema';
 
 export const upsertBlock = (data: AppData, block: Block): AppData => {
@@ -13,7 +13,7 @@ export const deleteBlock = (data: AppData, id: string): AppData => ({ ...data, b
 
 /** Resultatet af at placere en klasse i en celle. */
 export type PlaceOutcome =
-  | { kind: 'ok'; block: Block; derived: boolean }
+  | { kind: 'ok'; block: Block; source: TimeSource | 'custom' }
   | { kind: 'choice'; base: Block; options: TimeRule[] }
   | { kind: 'none'; base: Block };
 
@@ -24,10 +24,12 @@ export type PlaceOutcome =
  */
 export function placeBlock(data: AppData, block: Block, target: Target): PlaceOutcome {
   const base: Block = { ...block, day: target.day, period: target.period, roomId: target.roomId };
-  if (block.timeMode === 'custom') return { kind: 'ok', block: base, derived: false };
+  if (block.timeMode === 'custom') return { kind: 'ok', block: base, source: 'custom' };
   const sameSlot = block.day === target.day && block.period === target.period;
-  const r = resolveTime(data.timeRules, block.groupIds, target.day, target.period, sameSlot ? block.ruleId : null);
-  if (r.kind === 'single') return { kind: 'ok', block: { ...base, start: r.start, end: r.end, ruleId: r.ruleId }, derived: r.derived };
+  // Samme dag og dagdel: behold reglen. Ellers foretrækkes klassens nuværende tidsrum, hvis holdet
+  // også har det i måldagdelen (fx Hold 2's middagstid på en ny dag).
+  const r = resolveTime(data, block.groupIds, target.day, target.period, sameSlot ? { ruleId: block.ruleId } : { start: block.start, end: block.end });
+  if (r.kind === 'single') return { kind: 'ok', block: { ...base, start: r.start, end: r.end, ruleId: r.ruleId }, source: r.source };
   if (r.kind === 'choice') return { kind: 'choice', base, options: r.options };
   return { kind: 'none', base };
 }
@@ -50,6 +52,16 @@ export function updateRules(data: AppData, rules: TimeRule[]) {
   const blocks = r.data.blocks.map((b) => (r.unresolved.includes(b.id) ? { ...b, timeMode: 'custom' as const, ruleId: null } : b));
   return { data: { ...r.data, blocks }, changed: r.changed, toCustom: r.unresolved };
 }
+
+/** Ændrer en standardtid (null = ingen) og genberegner berørte klasser. */
+export function updateStandardTime(data: AppData, day: number, period: number, slot: { start: number; end: number } | null) {
+  const standardTimes = data.settings.standardTimes.map((row, d) => row.map((s, p) => (d === day && p === period ? slot : s)));
+  return updateRules({ ...data, settings: { ...data.settings, standardTimes } }, data.timeRules);
+}
+
+/** Udleder alle standardtider af tidstabellen igen. */
+export const resetStandardTimes = (data: AppData) =>
+  updateRules({ ...data, settings: { ...data.settings, standardTimes: deriveStandardTimes(data.timeRules) } }, data.timeRules);
 
 export const updateRule = (data: AppData, id: string, patch: Partial<TimeRule>) =>
   updateRules(

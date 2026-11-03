@@ -102,6 +102,17 @@ Kilde: Balletskole_Skema_26_27_Master_fra_uge_43, ark "KDS". Genereret af `npx t
 | Formiddag | Hold 8 + Hold 9 | 10.10–11.45 | PDD | KDS!D35 |
 | Middag | Kompagni B | 12.15–15.00 | – | KDS!D36 (÷ p) |
 
+## Standardtider (bruges, når holdet ikke har sin egen tid i dagdelen)
+
+| Dag | Morgen | Formiddag | Middag | Eftermiddag |
+|---|---|---|---|---|
+| Mandag | 08.10–09.55 | 10.10–10.55 | 11.50–13.05 | 16.50–18.00 |
+| Tirsdag | 08.10–09.55 | 10.10–10.55 | 11.50–13.05 | 16.50–18.00 |
+| Onsdag | 08.10–09.55 | 10.10–10.55 | 11.50–13.05 | 16.50–18.00 |
+| Torsdag | 08.10–09.55 | 10.10–10.55 | 11.50–13.05 | 16.50–18.00 |
+| Fredag | 08.25–09.55 | 10.10–10.55 | 11.50–13.05 | 16.50–18.00 |
+| Lørdag | 08.25–09.55 | 10.10–10.55 | 12.15–15.00 | 16.50–18.00 |
+
 ## Morgensamling
 
 Fredag 08.10–08.20 · Hold 3, Hold 4, Hold 5, Hold 6, Hold 7, Hold 8, Hold 9 · Malersalen · kilde KDS!D26: "8.10-8.20 Morgensamling: Hold 3-9 i Malersalen DT/CO"

@@ -1,10 +1,16 @@
 # WORK_STATUS
 
-Opdateret: 3. november 2026 (version 2 + automatisk tid ved alle flytninger og "anden slags" blokke).
+Opdateret: 4. november 2026 (beregning som skolens timeopgørelse + spørgsmål under tandhjulet).
 
 ## Verificeret status
 
 - `npm run typecheck` og `npm run build` er rene.
+- 4. nov.: Timeberegningen følger `Fernando_Mora_timer_26_27.docx`: kontrakt − 1 t orientering,
+  25 min forberedelse pr. time, lørdage × 1,25 fordelt på 18 lørdage / 41 uger, timebank pr. uge
+  og sæson, afrunding til hele minutter i hvert trin. FM's tal genskabes præcist (unit-test).
+  Datamodel version 4 (kontrakttimer, orientering og lørdage pr. lærer, "uden forberedelse" pr.
+  klasse, svar på spørgsmål, mulig 9. kolonne). Åbne spørgsmål besvares med ét klik under
+  tandhjulet → Spørgsmål.
 - 3. nov.: En flytning giver aldrig "ingen tidsregel" længere. Tiden kommer fra holdets egen tid
   samme dag, holdets tid i samme dagdel en anden dag eller dagdelens standardtid (redigerbar).
   En manuel rettelse af tiden gør klassen til en "anden slags" blok med egne tider.
@@ -40,6 +46,6 @@ Se også Indstillinger → Tidsregler og morgensamling → Kilde, og `docs/tidst
 
 ## Næste skridt
 
-1. Få afklaret punkt 1–3 ovenfor, og ret tidstabellen eller kolonnerne, hvis det er nødvendigt.
+1. Besvar spørgsmålene under tandhjulet → Spørgsmål, og udfyld kontrakttimer for de øvrige lærere.
 2. Flet grenen `design-og-robusthed` ind i `main`, og sæt appen online (README → Online drift).
 3. Afprøv på en rigtig iPad i Safari.

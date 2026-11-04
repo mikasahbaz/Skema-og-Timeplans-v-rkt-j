@@ -27,6 +27,7 @@ import { ConflictDialog } from './Conflicts';
 import { DayList, DayTabs } from './DayList';
 import { BlockPreview, groupsLabel, parseCellId, ScheduleGrid, type CellRef, type GridData, type Placement, type PlaceMode } from './Grid';
 import { HoursColumn } from './HoursColumn';
+import { openCount } from './questions';
 import { ImportDialog, type ImportState } from './ImportDialog';
 import { LoginForm } from './Login';
 import * as ops from './ops';
@@ -74,6 +75,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
   const summaries = useMemo(() => computeAllSummaries(data), [data]);
   const conflicts = useMemo(() => allConflicts(data), [data]);
   const grid = useMemo(() => ({ ...data, assembly: data.settings.assembly }), [data]);
+  const openPoints = useMemo(() => openCount(data), [data]);
 
   const { toasts, push, dismiss } = useToasts();
   const [openTeacher, setOpenTeacher] = useState<string | null>(null);
@@ -196,6 +198,7 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
     end: 1,
     timeMode: 'rule',
     ruleId: null,
+    noPrep: false,
     note: '',
   });
 
@@ -426,8 +429,14 @@ export function Editor({ store, session, onLogout }: { store: EditorStore; sessi
           <button className="btn btn-primary" onClick={() => setPanel({ kind: 'add', rect: null, target: null })}>
             <Icon name="plus" size={18} /> Tilføj ny klasse
           </button>
-          <button className="icon-btn icon-btn-lg gear" onClick={() => setSettings({ section: null, teacherId: null })} aria-label="Indstillinger og øvrige funktioner">
+          <button
+            className="icon-btn icon-btn-lg gear"
+            onClick={() => setSettings({ section: openPoints ? 'questions' : null, teacherId: null })}
+            aria-label="Indstillinger og øvrige funktioner"
+            title={openPoints ? `${openPoints} spørgsmål venter på svar` : undefined}
+          >
             <Icon name="gear" size={22} />
+            {openPoints > 0 && <span className="gear-dot" aria-hidden="true" />}
           </button>
         </div>
       </header>

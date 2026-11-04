@@ -43,8 +43,8 @@ describe('tidsregler', () => {
     const data = { ...d, blocks: [b] };
     const fri = placeBlock(data, b, { day: 4, period: 0, roomId: 'room-2' });
     expect(fri).toMatchObject({ kind: 'ok', block: { start: 505, end: 595, ruleId: 'fri' } });
-    const before = computeTeacherSummary(data, 'th').week.U;
-    const after = computeTeacherSummary({ ...data, blocks: [(fri as { block: typeof b }).block] }, 'th').week.U;
+    const before = computeTeacherSummary(data, 'th').week.weekdayU;
+    const after = computeTeacherSummary({ ...data, blocks: [(fri as { block: typeof b }).block] }, 'th').week.weekdayU;
     expect(before).toBe(105);
     expect(after).toBe(90);
   });
@@ -54,7 +54,9 @@ describe('tidsregler', () => {
     expect(sat.kind).toBe('ok');
     const placed = (sat as { block: typeof b }).block;
     expect([placed.start, placed.end]).toEqual([505, 595]);
-    expect(computeTeacherSummary({ ...d, blocks: [placed] }, 'th').week.L).toBe(45);
+    const sum = computeTeacherSummary({ ...d, blocks: [placed] }, 'th');
+    expect(sum.saturday.U).toBe(90);
+    expect(sum.saturday.counted! - sum.saturday.U).toBe(45); // 50 % tillæg af 90 min
   });
   it('kun ny sal bevarer tiden; ingen regel giver ingen opdigtet tid', () => {
     const b = block({ timeMode: 'rule', ruleId: 'mon', start: 490, end: 595 });
@@ -73,7 +75,8 @@ describe('tidsregler', () => {
       expect(out).toMatchObject({ kind: 'ok', block: { start: 550, end: 595, day: t.day, period: t.period } });
     }
     const sat = (placeBlock({ ...d, blocks: [b] }, b, { day: 5, period: 3, roomId: 'room-1' }) as { block: typeof b }).block;
-    expect(computeTeacherSummary({ ...d, blocks: [sat] }, 'th').week.L).toBe(22.5);
+    const sum = computeTeacherSummary({ ...d, blocks: [sat] }, 'th');
+    expect(sum.saturday.counted! - sum.saturday.U).toBe(22.5);
   });
   it('ændret regel genberegner regelklasser og rører ikke egne tider', () => {
     const r1 = block({ id: 'r1', timeMode: 'rule', ruleId: 'mon', start: 490, end: 595 });

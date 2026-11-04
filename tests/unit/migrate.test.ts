@@ -21,7 +21,8 @@ describe('migrering fra version 1', () => {
   const d = data as AppData;
   it('bevarer lærere, farver, satser og klasser', () => {
     expect(validateAppData(d).errors).toEqual([]);
-    expect(d.teachers).toEqual(v1.teachers);
+    expect(d.teachers[0]).toMatchObject(v1.teachers[0]); // intet går tabt; nye felter tilføjes
+    expect(d.teachers[0].contractHours).toBeNull();
     expect(d.blocks).toHaveLength(2);
     expect(d.settings.prepPercent).toBe(25);
     expect(d.groups.find((g) => g.id === 'g6')!.name).toBe('Hold 6'); // eksisterende hold matches på navn
@@ -36,13 +37,22 @@ describe('migrering fra version 1', () => {
   it('lader et dokument i den aktuelle version være', () => {
     expect(migrateAny(d).report).toBeNull();
   });
+  it('version 3 → 4: skolens regler fra timeopgørelsen; FM får 26 t; tidligere årstimer bevares', () => {
+    const { contractHours: _c, orientationHours: _o, saturdays: _s, ...t0 } = { ...d.teachers[0], initials: 'FM' };
+    const v3 = { ...d, schemaVersion: 3, teachers: [t0], blocks: d.blocks.map(({ noPrep: _n, ...b }) => b) };
+    const m = migrateAny(v3).data as AppData;
+    expect(validateAppData(m).errors).toEqual([]);
+    expect(m.teachers[0]).toMatchObject({ contractHours: 26, annualHours: 1600 });
+    expect(m.settings).toMatchObject({ saturdayPercent: 25, teachingWeeks: 41, saturdaysPerSeason: 18, orientationHours: 1, rounding: 'steps', prepBasis: 'withSaturday' });
+    expect(m.blocks.every((b) => b.noPrep === false)).toBe(true);
+  });
   it('version 2 får standardtider uden at ændre klasserne', () => {
     const { standardTimes: _, ...settings } = d.settings;
     const v2 = { ...d, schemaVersion: 2, settings };
     const r = migrateAny(v2);
     const m = r.data as AppData;
     expect(validateAppData(m).errors).toEqual([]);
-    expect(m.blocks).toEqual(d.blocks);
+    expect(m.blocks.map((b) => [b.id, b.start, b.end, b.timeMode])).toEqual(d.blocks.map((b) => [b.id, b.start, b.end, b.timeMode]));
     expect(m.settings.standardTimes[0][0]).toEqual({ start: 490, end: 595 });
     expect(r.report?.from).toBe(2);
   });

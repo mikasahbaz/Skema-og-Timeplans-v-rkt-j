@@ -472,12 +472,12 @@ input[type='radio'] {
 
 /* ---- Skematavle --------------------------------------------------------------------------------- */
 .board {
-  min-width: calc(var(--period-w) + 8 * var(--col-min));
+  min-width: calc(var(--period-w) + var(--rooms, 8) * var(--col-min));
   padding-bottom: var(--s5);
 }
 .board-row {
   display: grid;
-  grid-template-columns: var(--period-w) repeat(8, minmax(var(--col-min), 1fr));
+  grid-template-columns: var(--period-w) repeat(var(--rooms, 8), minmax(var(--col-min), 1fr));
 }
 .board-head {
   position: sticky;
@@ -1485,6 +1485,75 @@ button.assembly:hover {
   gap: 4px;
   font-size: var(--fs-sm);
   color: var(--text-2);
+}
+.calc-table th {
+  font-weight: 500;
+}
+.calc-group th,
+.calc-group td {
+  font-weight: 700;
+  border-top: 1px solid var(--line-strong);
+}
+.calc-sub th {
+  padding-left: var(--s5);
+  color: var(--text-2);
+}
+.calc-total th,
+.calc-total td {
+  font-weight: 800;
+  border-top: 1.5px solid var(--text);
+}
+.gear {
+  position: relative;
+}
+.gear-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s4);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.question.answered {
+  border-left-color: var(--line-strong);
+  background: var(--bg);
+}
+.question h4 {
+  font-size: var(--fs);
+}
+.answer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.missing-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.missing-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.all-done {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--ok);
+  font-weight: 600;
 }
 .card {
   display: flex;

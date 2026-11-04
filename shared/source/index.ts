@@ -10,8 +10,12 @@ export const SOURCE_NAME = `${SOURCE.file.replace(/\.xlsx$/, '')}, ark "${SOURCE
 
 type Entry = (typeof SOURCE.entries)[number];
 
-/** Kildens ni rumkolonner → appens otte. K-salen (kolonne 7 i kilden) har ingen kolonne i appen. */
-export const SOURCE_ROOM_TO_APP: (number | null)[] = [0, 1, 2, 3, 4, 5, 6, null, 7];
+/**
+ * Kildens ni rum → appens kolonner (efter id, så omdøbning og rækkefølge ikke betyder noget).
+ * K-salen har kun en kolonne, hvis den er tilføjet (svar under Spørgsmål).
+ */
+export const SOURCE_ROOM_IDS = ['room-1', 'room-2', 'room-3', 'room-4', 'room-5', 'room-6', 'room-7', 'room-k', 'room-gym'];
+export const K_ROOM_ID = 'room-k';
 
 const slug = (s: string) =>
   s
@@ -129,6 +133,9 @@ export function sourceWeek(data: AppData): { data: AppData; unplaced: Entry[]; s
       name: '',
       color: nextTeacherColor(teachers.map((x) => x.color)),
       annualHours: null,
+      contractHours: null,
+      orientationHours: null,
+      saturdays: null,
       archived: false,
     };
     teachers.push(nt);
@@ -142,8 +149,8 @@ export function sourceWeek(data: AppData): { data: AppData; unplaced: Entry[]; s
       skipped.push(e);
       continue;
     }
-    const roomIndex = SOURCE_ROOM_TO_APP[e.room];
-    if (roomIndex === null) {
+    const room = base.rooms.find((r) => r.id === SOURCE_ROOM_IDS[e.room]);
+    if (!room) {
       unplaced.push(e);
       continue;
     }
@@ -156,11 +163,12 @@ export function sourceWeek(data: AppData): { data: AppData; unplaced: Entry[]; s
       teacherIds: [...new Set(e.teachers.map(teacherId))].slice(0, 2),
       day: e.day,
       period: e.period,
-      roomId: base.rooms[roomIndex].id,
+      roomId: room.id,
       start: e.start,
       end: e.end,
       timeMode: 'rule',
       ruleId: rule?.id ?? null,
+      noPrep: e.mark && data.settings.answers?.noPrep?.answer === 'yes',
       note: e.mark ? '÷ p (fra kilden)' : '',
     });
   }

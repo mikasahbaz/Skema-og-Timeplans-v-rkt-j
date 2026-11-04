@@ -24,6 +24,7 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
   const [startText, setStartText] = useState(initial.timeMode === 'custom' ? formatClock(initial.start) : '');
   const [endText, setEndText] = useState(initial.timeMode === 'custom' ? formatClock(initial.end) : '');
   const [note, setNote] = useState(initial.note);
+  const [noPrep, setNoPrep] = useState(Boolean(initial.noPrep));
   const [showNote, setShowNote] = useState(Boolean(initial.note));
   const [ruleChoice, setRuleChoice] = useState<string | null>(initial.timeMode === 'rule' ? initial.ruleId : null);
   const [tried, setTried] = useState(false);
@@ -68,7 +69,7 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
   const submit = () => {
     setTried(true);
     if (errors.length) return;
-    const base: Block = { ...initial, groupIds, teacherIds, title: title.trim(), note: note.trim() };
+    const base: Block = { ...initial, groupIds, teacherIds, title: title.trim(), note: note.trim(), noPrep };
     if (custom) return onSubmit({ ...base, timeMode: 'custom', ruleId: null, start: start!, end: end! });
     if (resolution?.kind === 'single') return onSubmit({ ...base, timeMode: 'rule', ruleId: resolution.ruleId, start: resolution.start, end: resolution.end });
     if (resolution?.kind === 'choice') {
@@ -206,6 +207,11 @@ export function ClassForm({ data, initial, placed, submitLabel, onSubmit, onCanc
           </>
         )}
       </div>
+
+      <label className="check check-small">
+        <input type="checkbox" checked={noPrep} onChange={(e) => setNoPrep(e.target.checked)} />
+        <span>Uden forberedelse</span>
+      </label>
 
       {showNote ? (
         <label className="field">

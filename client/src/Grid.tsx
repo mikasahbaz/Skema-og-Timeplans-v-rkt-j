@@ -104,7 +104,11 @@ export function ScheduleGrid(props: GridProps) {
   };
 
   return (
-    <div className={`board${props.placement ? ` placing placing-${props.placement.mode}` : ''}`} onKeyDown={onGridKey}>
+    <div
+      className={`board${props.placement ? ` placing placing-${props.placement.mode}` : ''}`}
+      style={{ ['--rooms' as string]: data.rooms.length }}
+      onKeyDown={onGridKey}
+    >
       <div className="board-row board-head" role="row">
         <div className="corner" />
         {data.rooms.map((r) => (

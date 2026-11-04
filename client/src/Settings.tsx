@@ -1,18 +1,27 @@
 // Panelet bag tandhjulet: fire afsnit, ét åbent ad gangen.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { MISSING_LABELS, computeTeacherSummary, prepMinutesPerHour, type TeacherSummary } from '../../shared/calc';
+import { MISSING_LABELS, computeTeacherSummary, prepMinutesPerHour, prepPercentFromMinutes, type TeacherSummary } from '../../shared/calc';
 import { allConflicts, describeConflict, slotTitle, ASSEMBLY_ID } from '../../shared/conflicts';
-import { DAY_NAMES, DAY_SHORT, type AppData, type Block } from '../../shared/schema';
-import { formatDecimalHours, formatDuration, formatHours, formatNumber, formatRange } from '../../shared/time';
+import { DAY_NAMES, DAY_SHORT, SCHOOL_RULES_26_27, type AppData, type Block } from '../../shared/schema';
+import { formatDuration, formatNumber, formatRange } from '../../shared/time';
 import { usage } from '../../shared/validate';
 import { api, STANDALONE, type RevisionInfo } from './api';
 import { AddRow, ColorPicker, CommitNumber, CommitText, Row, Segmented, cleanErrors } from './fields';
 import { groupsLabel } from './Grid';
 import * as ops from './ops';
+import { QUESTIONS, teachersMissingContract } from './questions';
+
+function questionsDesc(data: AppData) {
+  const q = QUESTIONS.filter((x) => !data.settings.answers[x.id]).length;
+  const t = teachersMissingContract(data).length;
+  const parts = [q ? `${q} spørgsmål venter på svar` : '', t ? `${t} ${t === 1 ? 'lærer mangler' : 'lærere mangler'} kontrakttimer` : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Alt er besvaret';
+}
+import { QuestionsSection } from './SettingsQuestions';
 import { RulesSection, type RulesProps } from './SettingsRules';
 import { Icon, TeacherChip, useEscape } from './ui';
 
-export type SectionId = 'people' | 'rules' | 'work' | 'tools';
+export type SectionId = 'questions' | 'people' | 'rules' | 'work' | 'tools';
 
 export interface SettingsProps extends RulesProps {
   section: SectionId | null;
@@ -31,9 +40,10 @@ export interface SettingsProps extends RulesProps {
 }
 
 const SECTIONS: { id: SectionId; title: string; desc: string }[] = [
+  { id: 'questions', title: 'Spørgsmål', desc: '' },
   { id: 'people', title: 'Lærere og hold', desc: 'Lærere, farver, hold og salenes navne' },
   { id: 'rules', title: 'Tidsregler og morgensamling', desc: 'Tider fra skemadokumentet og fredagens morgensamling' },
-  { id: 'work', title: 'Arbejdstid, forberedelse og lørdagstillæg', desc: 'Satser, årsarbejdstid og detaljeret opgørelse' },
+  { id: 'work', title: 'Arbejdstid, forberedelse og lørdagstillæg', desc: 'Satser, kontrakt, timebank og opgørelse pr. lærer' },
   { id: 'tools', title: 'Øvrige værktøjer', desc: 'Fortryd, konflikter, backup og læsevisning' },
 ];
 
@@ -60,12 +70,15 @@ export function Settings(p: SettingsProps) {
                 <button className="section-toggle" aria-expanded={open} onClick={() => p.onSection(open ? null : s.id)}>
                   <span>
                     <span className="section-title">{s.title}</span>
-                    <span className="section-desc">{s.desc}</span>
+                    <span className="section-desc">
+                      {s.id === 'questions' ? questionsDesc(p.data) : s.desc}
+                    </span>
                   </span>
                   <Icon name="chevronDown" size={20} className="chev" />
                 </button>
                 {open && (
                   <>
+                    {s.id === 'questions' && <QuestionsSection data={p.data} onCommit={p.onCommit} />}
                     {s.id === 'people' && <PeopleSection {...p} />}
                     {s.id === 'rules' && <RulesSection {...p} />}
                     {s.id === 'work' && <WorkSection {...p} />}
@@ -242,10 +255,14 @@ function ArchivedToggle({ count, show, onToggle }: { count: number; show: boolea
 // ---- 3. Arbejdstid, forberedelse og lørdagstillæg ---------------------------------------------
 function WorkSection(p: SettingsProps) {
   const { data, onCommit } = p;
-  const [tab, setTab] = useState<'rates' | 'annual' | 'detail'>(p.detailTeacherId ? 'detail' : 'rates');
+  const [tab, setTab] = useState<'rates' | 'contract' | 'detail'>(p.detailTeacherId ? 'detail' : 'rates');
   const [teacherId, setTeacherId] = useState<string>(p.detailTeacherId ?? [...data.teachers].sort((a, b) => a.initials.localeCompare(b.initials, 'da'))[0]?.id ?? '');
   const s = data.settings;
   const set = (patch: Partial<typeof s>, label: string) => cleanErrors(onCommit(label, ops.updateSettings(data, patch)));
+  const minPerHour = s.prepPercent === null ? null : Math.round(prepMinutesPerHour(s.prepPercent) * 10000) / 10000;
+  const isSchool = (Object.keys(SCHOOL_RULES_26_27) as (keyof typeof SCHOOL_RULES_26_27)[]).every((k) =>
+    k === 'prepPercent' ? s.prepPercent !== null && Math.abs(s.prepPercent - SCHOOL_RULES_26_27.prepPercent) < 1e-9 : s[k] === SCHOOL_RULES_26_27[k],
+  );
   return (
     <div className="section-body">
       <Segmented
@@ -254,33 +271,67 @@ function WorkSection(p: SettingsProps) {
         onChange={setTab}
         options={[
           ['rates', 'Satser'],
-          ['annual', 'Årsarbejdstid'],
+          ['contract', 'Kontrakt og timebank'],
           ['detail', 'Opgørelse pr. lærer'],
         ]}
       />
       {tab === 'rates' && (
         <>
-          <p className="hint">Skolens egne beregningsregler. Et tomt felt betyder, at oplysningen mangler – det regnes ikke som 0.</p>
-          <Row label="Forberedelse" help={s.prepPercent === null ? 'Mangler' : `= ${formatNumber(prepMinutesPerHour(s.prepPercent))} min pr. 60 min undervisning`}>
-            <CommitNumber value={s.prepPercent} label="Forberedelse i procent" suffix="%" onCommit={(v) => set({ prepPercent: v }, 'Ændr forberedelse')} />
+          <div className={`notice ${isSchool ? '' : 'notice-warn'}`}>
+            {isSchool ? (
+              <>Satserne følger skolens timeopgørelse for sæson 26/27 (Fernando_Mora_timer_26_27).</>
+            ) : (
+              <>
+                Satserne afviger fra skolens timeopgørelse 26/27.{' '}
+                <button className="link-btn" onClick={() => set({ ...SCHOOL_RULES_26_27 }, 'Brug skolens regler 26/27')}>
+                  Brug skolens regler
+                </button>
+              </>
+            )}
+          </div>
+          <Row label="Forberedelse" help={s.prepPercent === null ? 'Mangler' : `pr. undervisningstime (= ${formatNumber(s.prepPercent)} %)`}>
+            <CommitNumber
+              value={minPerHour}
+              label="Forberedelse i minutter pr. undervisningstime"
+              suffix="min pr. time"
+              onCommit={(v) => set({ prepPercent: v === null ? null : prepPercentFromMinutes(v) }, 'Ændr forberedelse')}
+            />
           </Row>
-          <Row label="Lørdagstillæg" help="Procent af den faktiske undervisningstid om lørdagen">
+          <Row label="Lørdagstillæg" help={s.saturdayPercent === null ? 'Mangler' : `Lørdagstimer tæller × ${formatNumber(1 + s.saturdayPercent / 100)}`}>
             <CommitNumber value={s.saturdayPercent} label="Lørdagstillæg i procent" suffix="%" onCommit={(v) => set({ saturdayPercent: v }, 'Ændr lørdagstillæg')} />
           </Row>
-          <Row label="Forberedelse beregnes af" help="De to regler giver forskellige tal for lørdagsundervisning.">
+          <Row label="Forberedelse til lørdage" help="Timeopgørelsen beregner forberedelsen af lørdagstiden inkl. tillæg.">
             <div className="radio-list">
               <label className="check">
-                <input type="radio" name="basis" checked={s.prepBasis === 'actual'} onChange={() => set({ prepBasis: 'actual' }, 'Forberedelse af faktisk undervisning')} />
-                <span>Faktisk undervisningstid (standard)</span>
+                <input type="radio" name="basis" checked={s.prepBasis === 'withSaturday'} onChange={() => set({ prepBasis: 'withSaturday' }, 'Forberedelse af lørdagstid inkl. tillæg')} />
+                <span>Af lørdagstiden inkl. tillæg (som timeopgørelsen)</span>
               </label>
               <label className="check">
-                <input type="radio" name="basis" checked={s.prepBasis === 'withSaturday'} onChange={() => set({ prepBasis: 'withSaturday' }, 'Forberedelse inkl. lørdagstillæg')} />
-                <span>Undervisning inkl. lørdagstillæg</span>
+                <input type="radio" name="basis" checked={s.prepBasis === 'actual'} onChange={() => set({ prepBasis: 'actual' }, 'Forberedelse af faktisk lørdagstid')} />
+                <span>Af den faktiske lørdagstid</span>
               </label>
             </div>
           </Row>
-          <Row label="Undervisningsuger" help="Antal uger i skoleåret, hvor grundugen gentages">
+          <Row label="Undervisningsuger" help="Uger i sæsonen; lørdagene fordeles på dem">
             <CommitNumber value={s.teachingWeeks} label="Antal undervisningsuger" suffix="uger" onCommit={(v) => set({ teachingWeeks: v }, 'Ændr undervisningsuger')} />
+          </Row>
+          <Row label="Lørdage pr. sæson" help="Antal lørdage med undervisning (kan sættes pr. lærer)">
+            <CommitNumber value={s.saturdaysPerSeason} label="Antal lørdage pr. sæson" suffix="lørdage" onCommit={(v) => set({ saturdaysPerSeason: v }, 'Ændr antal lørdage')} />
+          </Row>
+          <Row label="Orientering og mails" help="Trækkes fra kontrakten pr. uge (kan sættes pr. lærer)">
+            <CommitNumber value={s.orientationHours} label="Orientering pr. uge i timer" suffix="t pr. uge" onCommit={(v) => set({ orientationHours: v }, 'Ændr tid til orientering')} />
+          </Row>
+          <Row label="Afrunding" help="De to måder kan give et par minutters forskel pr. uge.">
+            <div className="radio-list">
+              <label className="check">
+                <input type="radio" name="rounding" checked={s.rounding === 'steps'} onChange={() => set({ rounding: 'steps' }, 'Afrund som timeopgørelsen')} />
+                <span>Hele minutter i hvert trin (som timeopgørelsen)</span>
+              </label>
+              <label className="check">
+                <input type="radio" name="rounding" checked={s.rounding === 'exact'} onChange={() => set({ rounding: 'exact' }, 'Regn præcist')} />
+                <span>Præcist – afrund kun det viste resultat</span>
+              </label>
+            </div>
           </Row>
           <Row label="Morgensamling" help="Indstilles under Tidsregler og morgensamling">
             <span>
@@ -288,15 +339,18 @@ function WorkSection(p: SettingsProps) {
             </span>
           </Row>
           <div className="formula">
-            <div className="label">Sådan regnes der pr. lærer og dag</div>
-            <code>Undervisning U = klassernes faktiske varighed (to lærere får begge hele tiden)</code>
-            <code>Lørdagstillæg L = U × {s.saturdayPercent ?? 's'} % om lørdagen, ellers 0</code>
-            <code>Forberedelse F = {s.prepBasis === 'actual' ? 'U' : '(U + L)'} × {s.prepPercent ?? 'p'} %</code>
-            <code>I alt K = U + F + L · Planlagt år = K × uger · Rest = årsarbejdstid − planlagt</code>
+            <div className="label">Sådan regnes der pr. lærer</div>
+            <code>Undervisning ma–fre: klassernes faktiske tid (to lærere får begge hele tiden)</code>
+            <code>Forberedelse: {minPerHour ?? 'x'} min pr. undervisningstime</code>
+            <code>
+              Lørdag: tid × {s.saturdayPercent === null ? '(1 + tillæg)' : formatNumber(1 + s.saturdayPercent / 100)} × {s.saturdaysPerSeason ?? 'antal'} lørdage ÷{' '}
+              {s.teachingWeeks ?? 'uger'} uger
+            </code>
+            <code>Timebank pr. uge = kontrakt − {s.orientationHours ?? 'orientering'} t − undervisning − forberedelse − lørdage</code>
           </div>
         </>
       )}
-      {tab === 'annual' && <AnnualTable {...p} />}
+      {tab === 'contract' && <ContractTable {...p} />}
       {tab === 'detail' && (
         <>
           <label className="field field-inline">
@@ -319,136 +373,155 @@ function WorkSection(p: SettingsProps) {
   );
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const fmtH = (min: number | null) => (min === null ? 'mangler' : formatDuration(min));
 
-function AnnualTable({ data, onCommit }: SettingsProps) {
+function ContractTable({ data, onCommit }: SettingsProps) {
+  const s = data.settings;
   return (
     <>
       <p className="hint">
-        Planlagt årstid = ugens samlede tid × {data.settings.teachingWeeks ?? 'antal uger'}. Beregningen forudsætter samme grunduge i alle
-        undervisningsuger; møder, forestillinger og øvrige opgaver er ikke indregnet.
+        Kontrakttimer pr. uge fra den enkelte lærers kontrakt. Orientering og lørdage kan sættes pr. lærer; tomt felt = skolens fælles værdi (
+        {s.orientationHours ?? '?'} t, {s.saturdaysPerSeason ?? '?'} lørdage). Timebanken er den del af kontrakten, der ikke går til undervisning
+        og forberedelse. Aflyst undervisning er ikke indregnet.
       </p>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Lærer</th>
-            <th>Årsarbejdstimer</th>
-            <th>Planlagt</th>
-            <th>Rest</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...data.teachers]
-            .filter((t) => !t.archived)
-            .sort((a, b) => a.initials.localeCompare(b.initials, 'da'))
-            .map((t) => {
-              const a = computeTeacherSummary(data, t.id).annual;
-              return (
-                <tr key={t.id}>
-                  <th scope="row">
-                    <TeacherChip teacher={t} />
-                  </th>
-                  <td>
-                    <CommitNumber value={t.annualHours} label={`Årsarbejdstimer for ${t.initials}`} suffix="t" onCommit={(v) => cleanErrors(onCommit(`Årstimer for ${t.initials}`, ops.updateTeacher(data, t.id, { annualHours: v })))} />
-                  </td>
-                  <td className="num tabular">{a.plannedHours === null ? <span className="missing">mangler</span> : formatHours(round2(a.plannedHours))}</td>
-                  <td className={`num tabular${a.remainingHours !== null && a.remainingHours < 0 ? ' neg' : ''}`}>
-                    {a.remainingHours === null ? <span className="missing">mangler</span> : a.remainingHours < 0 ? `${formatHours(round2(-a.remainingHours))} for meget` : formatHours(round2(a.remainingHours))}
-                  </td>
-                </tr>
-              );
-            })}
-        </tbody>
-      </table>
-    </>
-  );
-}
-
-function TeacherDetail({ data, sum }: { data: AppData; sum: TeacherSummary }) {
-  const [unit, setUnit] = useState<'hm' | 'dec'>('hm');
-  const fmt = (m: number | null) => (unit === 'dec' ? formatDecimalHours(m) : formatDuration(m));
-  const a = sum.annual;
-  const missing = sum.missing.filter((m) => m !== 'saturdayPercent' || sum.week.L === null);
-  return (
-    <div className="detail">
-      <div className="detail-top">
-        <Segmented
-          label="Tidsformat"
-          value={unit}
-          onChange={setUnit}
-          options={[
-            ['hm', 't og min'],
-            ['dec', 'decimal'],
-          ]}
-        />
-      </div>
-      <div className="stat-grid">
-        <Stat label="Undervisning (U)" v={fmt(sum.week.U)} />
-        <Stat label="Forberedelse (F)" v={fmt(sum.week.F)} />
-        <Stat label="Undervisning + forberedelse" v={fmt(sum.week.UF)} />
-        <Stat label="Lørdagstillæg (L)" v={fmt(sum.week.L)} />
-        <Stat label="I alt pr. uge (K)" v={fmt(sum.week.K)} strong />
-      </div>
-      <div className="stat-grid">
-        <Stat label="Årsarbejdstimer" v={a.expectedHours === null ? 'mangler' : formatHours(a.expectedHours)} />
-        <Stat label="Planlagt fra grundugen" v={a.plannedHours === null ? 'mangler' : formatHours(round2(a.plannedHours))} />
-        <Stat
-          label={a.remainingHours !== null && a.remainingHours < 0 ? 'Overplanlagt' : 'Resterende årstimer'}
-          v={a.remainingHours === null ? 'mangler' : formatHours(round2(Math.abs(a.remainingHours)))}
-          strong
-          neg={a.remainingHours !== null && a.remainingHours < 0}
-        />
-      </div>
-      {missing.length > 0 && <p className="hint hint-warn">Mangler: {missing.map((m) => MISSING_LABELS[m]).join(', ')}.</p>}
-      {sum.assembly && <p className="hint">Morgensamlingen ({sum.assembly.minutes} min) indgår om fredagen.</p>}
       <div className="table-scroll">
         <table className="table">
           <thead>
             <tr>
-              <th>Dag</th>
-              <th>U</th>
-              <th>F</th>
-              <th>L</th>
-              <th>K</th>
+              <th>Lærer</th>
+              <th>Kontrakt pr. uge</th>
+              <th>Orientering</th>
+              <th>Lørdage</th>
+              <th>I alt pr. uge</th>
+              <th>Timebank pr. uge</th>
+              <th>Timebank sæson</th>
             </tr>
           </thead>
           <tbody>
-            {sum.days.map((d, i) => (
-              <tr key={i} className={d.U === 0 ? 'zero' : ''}>
-                <th scope="row">{DAY_SHORT[i]}</th>
-                <td className="num tabular">{fmt(d.U)}</td>
-                <td className="num tabular">{fmt(d.F)}</td>
-                <td className="num tabular">{fmt(d.L)}</td>
-                <td className="num tabular strong">{fmt(d.K)}</td>
-              </tr>
-            ))}
+            {[...data.teachers]
+              .filter((t) => !t.archived)
+              .sort((a, b) => a.initials.localeCompare(b.initials, 'da'))
+              .map((t) => {
+                const sum = computeTeacherSummary(data, t.id);
+                const upd = (patch: Partial<typeof t>, label: string) => cleanErrors(onCommit(label, ops.updateTeacher(data, t.id, patch)));
+                return (
+                  <tr key={t.id}>
+                    <th scope="row">
+                      <TeacherChip teacher={t} />
+                    </th>
+                    <td>
+                      <CommitNumber value={t.contractHours} label={`Kontrakttimer for ${t.initials}`} suffix="t" onCommit={(v) => upd({ contractHours: v }, `Kontrakt for ${t.initials}`)} />
+                    </td>
+                    <td>
+                      <CommitNumber value={t.orientationHours} label={`Orientering for ${t.initials}`} suffix="t" placeholder="fælles" onCommit={(v) => upd({ orientationHours: v }, `Orientering for ${t.initials}`)} />
+                    </td>
+                    <td>
+                      <CommitNumber value={t.saturdays} label={`Lørdage for ${t.initials}`} placeholder="fælles" onCommit={(v) => upd({ saturdays: v }, `Lørdage for ${t.initials}`)} />
+                    </td>
+                    <td className="num tabular">{fmtH(sum.week.K)}</td>
+                    <td className={`num tabular${sum.timebank.week !== null && sum.timebank.week < 0 ? ' neg' : ''}`}>{fmtH(sum.timebank.week)}</td>
+                    <td className={`num tabular${sum.timebank.season !== null && sum.timebank.season < 0 ? ' neg' : ''}`}>{fmtH(sum.timebank.season)}</td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </div>
-      <div className="two-col">
-        <div>
-          <h4 className="label">Pr. titel</h4>
-          <ul className="kv">
-            {sum.byTitle.map((r) => (
-              <li key={r.id}>
-                <span>{r.id}</span>
-                <span className="tabular">{fmt(r.minutes)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h4 className="label">Pr. hold</h4>
-          <ul className="kv">
-            {sum.byGroup.map((r) => (
-              <li key={r.id}>
-                <span>{groupsLabel(r.id.split('+'), data.groups)}</span>
-                <span className="tabular">{fmt(r.minutes)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+    </>
+  );
+}
+
+/** Opgørelse pr. lærer i samme opstilling som skolens timeopgørelse. */
+function TeacherDetail({ data, sum }: { data: AppData; sum: TeacherSummary }) {
+  const st = data.settings;
+  const minPerHour = st.prepPercent === null ? null : prepMinutesPerHour(st.prepPercent);
+  const weekdayByGroup = new Map<string, number>();
+  sum.blocksByDay.slice(0, 5).forEach((list) => list.forEach((b) => weekdayByGroup.set(b.groupIds.join('+'), (weekdayByGroup.get(b.groupIds.join('+')) ?? 0) + b.end - b.start)));
+  const satByGroup = new Map<string, number>();
+  sum.blocksByDay[5].forEach((b) => satByGroup.set(b.groupIds.join('+'), (satByGroup.get(b.groupIds.join('+')) ?? 0) + b.end - b.start));
+  const factor = st.saturdayPercent === null ? null : 1 + st.saturdayPercent / 100;
+  const missing = sum.missing;
+  return (
+    <div className="detail">
+      <table className="table calc-table">
+        <tbody>
+          <tr className="calc-group">
+            <th scope="row">Undervisning ma–fre</th>
+            <td className="num tabular strong">{formatDuration(sum.week.weekdayU)}</td>
+          </tr>
+          {[...weekdayByGroup].map(([g, m]) => (
+            <tr key={g} className="calc-sub">
+              <th scope="row">{groupsLabel(g.split('+'), data.groups)}</th>
+              <td className="num tabular">{formatDuration(m)}</td>
+            </tr>
+          ))}
+          {sum.assembly && (
+            <tr className="calc-sub">
+              <th scope="row">Morgensamling (fredag)</th>
+              <td className="num tabular">{formatDuration(sum.assembly.minutes)}</td>
+            </tr>
+          )}
+          <tr className="calc-group">
+            <th scope="row">Forberedelse ma–fre {minPerHour !== null && <span className="hint">({formatNumber(minPerHour)} min pr. time)</span>}</th>
+            <td className="num tabular strong">{fmtH(sum.week.weekdayF)}</td>
+          </tr>
+          {sum.saturday.U > 0 && (
+            <>
+              <tr className="calc-group">
+                <th scope="row">Lørdage</th>
+                <td className="num tabular strong">{fmtH(sum.week.saturday)} pr. uge</td>
+              </tr>
+              {[...satByGroup].map(([g, m]) => (
+                <tr key={g} className="calc-sub">
+                  <th scope="row">{groupsLabel(g.split('+'), data.groups)}</th>
+                  <td className="num tabular">{formatDuration(m)}</td>
+                </tr>
+              ))}
+              <tr className="calc-sub">
+                <th scope="row">Pr. lørdag {factor !== null && `(${formatDuration(sum.saturday.U)} × ${formatNumber(factor)})`}</th>
+                <td className="num tabular">{fmtH(sum.saturday.counted)}</td>
+              </tr>
+              <tr className="calc-sub">
+                <th scope="row">Pr. sæson ({sum.saturdays ?? '?'} lørdage)</th>
+                <td className="num tabular">{fmtH(sum.seasonSaturday.counted)}</td>
+              </tr>
+              <tr className="calc-group">
+                <th scope="row">Forberedelse lørdage</th>
+                <td className="num tabular strong">{fmtH(sum.week.saturdayF)} pr. uge</td>
+              </tr>
+              <tr className="calc-sub">
+                <th scope="row">Pr. lørdag · pr. sæson</th>
+                <td className="num tabular">
+                  {fmtH(sum.saturday.F)} · {fmtH(sum.seasonSaturday.F)}
+                </td>
+              </tr>
+            </>
+          )}
+          <tr className="calc-total">
+            <th scope="row">I alt pr. uge</th>
+            <td className="num tabular">{fmtH(sum.week.K)}</td>
+          </tr>
+          <tr className="calc-sub">
+            <th scope="row">
+              Kontrakt {sum.contract.hours ?? '?'} t − orientering {sum.contract.orientation ?? '?'} t = til rådighed
+            </th>
+            <td className="num tabular">{fmtH(sum.contract.available)}</td>
+          </tr>
+          <tr className="calc-total">
+            <th scope="row">Timebank pr. uge</th>
+            <td className={`num tabular${sum.timebank.week !== null && sum.timebank.week < 0 ? ' neg' : ''}`}>{fmtH(sum.timebank.week)}</td>
+          </tr>
+          <tr className="calc-total">
+            <th scope="row">Timebank pr. sæson ({sum.annual.weeks ?? '?'} uger)</th>
+            <td className={`num tabular${sum.timebank.season !== null && sum.timebank.season < 0 ? ' neg' : ''}`}>{fmtH(sum.timebank.season)}</td>
+          </tr>
+        </tbody>
+      </table>
+      {missing.length > 0 && <p className="hint hint-warn">Mangler: {missing.map((m) => MISSING_LABELS[m]).join(', ')}.</p>}
+      <p className="hint">
+        {st.rounding === 'steps' ? 'Afrundet til hele minutter i hvert trin som timeopgørelsen.' : 'Regnet præcist; kun det viste er afrundet.'} Aflyst undervisning,
+        møder og forestillinger er ikke indregnet.
+      </p>
       <h4 className="label">Klasser</h4>
       <ul className="kv">
         {sum.blocksByDay.flatMap((list, d) =>
@@ -457,21 +530,13 @@ function TeacherDetail({ data, sum }: { data: AppData; sum: TeacherSummary }) {
               <span>
                 {DAY_SHORT[d]} <span className="tabular">{formatRange(b.start, b.end)}</span> · {b.title} · {groupsLabel(b.groupIds, data.groups)}
                 {b.timeMode === 'custom' && ' · egne tider'}
+                {b.noPrep && ' · uden forberedelse'}
               </span>
-              <span className="tabular">{fmt(b.end - b.start)}</span>
+              <span className="tabular">{formatDuration(b.end - b.start)}</span>
             </li>
           )),
         )}
       </ul>
-    </div>
-  );
-}
-
-function Stat({ label, v, strong, neg }: { label: string; v: string; strong?: boolean; neg?: boolean }) {
-  return (
-    <div className={`stat${strong ? ' stat-strong' : ''}${neg ? ' neg' : ''}`}>
-      <span className="stat-label">{label}</span>
-      <span className="stat-value tabular">{v}</span>
     </div>
   );
 }

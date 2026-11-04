@@ -10,10 +10,12 @@ export const DAY_COUNT = 6; // mandag (0) … lørdag (5)
 export const SATURDAY = 5;
 export const FRIDAY = 4;
 export const ROOM_COUNT = 8;
+/** Skemadokumentet har ni rum; K-salen kan tilføjes som 9. kolonne (svar under Spørgsmål). */
+export const MAX_ROOM_COUNT = 9;
 export const PERIOD_COUNT = 4; // Morgen, Formiddag, Middag, Eftermiddag (som i skemadokumentet)
 export const MAX_TEACHERS_PER_BLOCK = 2;
 export const MAX_GROUPS_PER_BLOCK = 4;
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const DEFAULT_TITLE = 'Balletklasse';
 
 const id = z.string().trim().min(1, 'Mangler id').max(80);
@@ -30,7 +32,14 @@ export const teacherSchema = z.object({
   initials: z.string().trim().min(1, 'Initialer mangler').max(6, 'Initialer må højst have 6 tegn'),
   name: z.string().trim().max(80).default(''),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Farve skal være en hex-farve som #a1b2c3'),
+  /** Tidligere felt (forventede årstimer). Bevares, men bruges ikke længere i beregningen. */
   annualHours: nullableNumber(0, 5000, 'Årsarbejdstimer'),
+  /** Kontrakt: timer pr. uge (fx 26). null = mangler. */
+  contractHours: nullableNumber(0, 60, 'Kontrakttimer pr. uge'),
+  /** Afvigende tid til orientering/mails pr. uge; null = skolens fælles værdi. */
+  orientationHours: nullableNumber(0, 10, 'Orientering pr. uge'),
+  /** Afvigende antal lørdage med undervisning pr. sæson; null = skolens fælles værdi. */
+  saturdays: nullableNumber(0, 60, 'Antal lørdage'),
   archived: z.boolean().default(false),
 });
 
@@ -83,6 +92,8 @@ export const blockSchema = z.object({
   timeMode: z.enum(['rule', 'custom']),
   /** Valgt tidsregel (rule-mode). null = fælles tid afledt af holdenes egne regler. */
   ruleId: id.nullable(),
+  /** Uden forberedelse (fx klasser markeret "÷ p" i skemadokumentet, hvis det bekræftes). */
+  noPrep: z.boolean().default(false),
   note: z.string().trim().max(300, 'Noten må højst have 300 tegn').default(''),
 });
 
@@ -112,13 +123,21 @@ export const settingsSchema = z.object({
   teachingWeeks: nullableNumber(0, 60, 'Undervisningsuger'),
   assembly: assemblySchema,
   standardTimes: standardTimesSchema,
+  /** Fast tid til orientering på platforme og mails pr. uge (trækkes fra kontrakten). */
+  orientationHours: nullableNumber(0, 10, 'Orientering pr. uge'),
+  /** Antal lørdage med undervisning pr. sæson (lørdagstiden fordeles på undervisningsugerne). */
+  saturdaysPerSeason: nullableNumber(0, 60, 'Antal lørdage pr. sæson'),
+  /** "steps" = hele minutter i hvert trin som timeopgørelsen; "exact" = afrund kun i visning. */
+  rounding: z.enum(['steps', 'exact']),
+  /** Svar på spørgsmål under tandhjulet (id → svar). */
+  answers: z.record(z.string(), z.object({ answer: z.string().max(60), at: z.string().max(40) })),
 });
 
 export const appDataSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   teachers: z.array(teacherSchema),
   groups: z.array(groupSchema),
-  rooms: z.array(roomSchema).length(ROOM_COUNT, `Der skal være præcis ${ROOM_COUNT} sale`),
+  rooms: z.array(roomSchema).min(ROOM_COUNT, `Der skal være mindst ${ROOM_COUNT} sale`).max(MAX_ROOM_COUNT, `Højst ${MAX_ROOM_COUNT} sale`),
   timeRules: z.array(timeRuleSchema).max(2000),
   blocks: z.array(blockSchema),
   settings: settingsSchema,
@@ -137,6 +156,22 @@ export type TimeMode = Block['timeMode'];
 export type StandardTimes = z.infer<typeof standardTimesSchema>;
 
 export const emptyStandardTimes = (): StandardTimes => Array.from({ length: DAY_COUNT }, () => Array.from({ length: PERIOD_COUNT }, () => null));
+
+/**
+ * Skolens beregningsregler for sæson 26/27 ifølge timeopgørelsen (Fernando_Mora_timer_26_27.docx):
+ * 25 min forberedelse pr. undervisningstime, lørdage tæller × 1,25 og forberedelse beregnes af
+ * lørdagstiden inkl. tillæg, 41 undervisningsuger, 18 lørdage, 1 t orientering pr. uge og
+ * afrunding til hele minutter i hvert trin.
+ */
+export const SCHOOL_RULES_26_27 = {
+  prepPercent: (25 / 60) * 100,
+  saturdayPercent: 25,
+  prepBasis: 'withSaturday' as const,
+  teachingWeeks: 41,
+  saturdaysPerSeason: 18,
+  orientationHours: 1,
+  rounding: 'steps' as const,
+};
 
 export const DAY_NAMES = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'] as const;
 export const DAY_SHORT = ['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør'] as const;
@@ -163,6 +198,10 @@ export const DEFAULT_SETTINGS: Settings = {
   teachingWeeks: null,
   assembly: EMPTY_ASSEMBLY,
   standardTimes: Array.from({ length: DAY_COUNT }, () => Array.from({ length: PERIOD_COUNT }, () => null)),
+  orientationHours: null,
+  saturdaysPerSeason: null,
+  rounding: 'exact',
+  answers: {},
 };
 
 export function defaultRooms(): Room[] {
@@ -180,7 +219,7 @@ export function emptyAppData(): AppData {
     rooms: defaultRooms(),
     timeRules: [],
     blocks: [],
-    settings: { ...DEFAULT_SETTINGS, assembly: { ...EMPTY_ASSEMBLY, groupIds: [] }, standardTimes: emptyStandardTimes() },
+    settings: { ...DEFAULT_SETTINGS, assembly: { ...EMPTY_ASSEMBLY, groupIds: [] }, standardTimes: emptyStandardTimes(), answers: {} },
   };
 }
 

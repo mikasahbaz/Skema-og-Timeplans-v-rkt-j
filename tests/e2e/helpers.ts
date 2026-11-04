@@ -8,12 +8,14 @@ export const VIEWER_PW = 'e2e-viewer';
 /** KDS-tidsreglerne + testopsætningen fra kravene: p = 25 %, s = 50 %, W = 36, A(TH) = 1600. */
 export function fixture(blocks: Block[] = []): AppData {
   const d = withSourceRules(emptyAppData());
-  d.settings = { ...d.settings, prepPercent: 25, saturdayPercent: 50, teachingWeeks: 36 };
+  // Testopsætningen fra de første krav (lørdag hver uge, præcis afrunding).
+  d.settings = { ...d.settings, prepPercent: 25, saturdayPercent: 50, prepBasis: 'actual', teachingWeeks: 36, saturdaysPerSeason: 36, orientationHours: 1, rounding: 'exact' };
+  const t = { name: '', annualHours: null, contractHours: null, orientationHours: null, saturdays: null, archived: false };
   d.teachers = [
-    { id: 'th', initials: 'TH', name: '', color: '#f9c6c9', annualHours: 1600, archived: false },
-    { id: 'co', initials: 'CO', name: '', color: '#bfe3c6', annualHours: null, archived: false },
-    { id: 'fm', initials: 'FM', name: '', color: '#c7d7f5', annualHours: 1500, archived: false },
-    { id: 'hc', initials: 'HC', name: '', color: '#fde1a9', annualHours: null, archived: false },
+    { ...t, id: 'th', initials: 'TH', color: '#f9c6c9', contractHours: 26 },
+    { ...t, id: 'co', initials: 'CO', color: '#bfe3c6' },
+    { ...t, id: 'fm', initials: 'FM', color: '#c7d7f5' },
+    { ...t, id: 'hc', initials: 'HC', color: '#fde1a9' },
   ];
   d.blocks = blocks;
   return d;
@@ -26,7 +28,7 @@ export const g = (name: string) => `g-${name.toLowerCase().replace(/[^a-z0-9]+/g
 export function ruleBlock(d: AppData, over: Partial<Block> & { groupIds: string[]; day: number; period: number }): Block {
   const r = d.timeRules.find((x) => x.day === over.day && x.period === over.period && x.groupIds.join() === over.groupIds.join());
   if (!r) throw new Error('Ingen regel i fixture');
-  return { id: 'b1', title: 'Balletklasse', teacherIds: ['th'], roomId: 'room-1', note: '', timeMode: 'rule', ruleId: r.id, start: r.start, end: r.end, ...over };
+  return { id: 'b1', title: 'Balletklasse', teacherIds: ['th'], roomId: 'room-1', note: '', noPrep: false, timeMode: 'rule', ruleId: r.id, start: r.start, end: r.end, ...over };
 }
 
 export async function resetData(request: APIRequestContext, data: AppData) {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { demoAppData } from '../../shared/demo';
 import { blockEl, cell, dragTo, fixture, g, loginAdmin, moveVia, resetData, ruleBlock, teacherDetail, teacherRow, VIEWER_PW, waitSaved } from './helpers';
 
 const H8 = g('Hold 8');
@@ -60,10 +61,10 @@ test('3–5) flytning mandag → fredag → lørdag ændrer tid, varighed og til
   await expect(cell(page, 4, 0, 'room-2').locator('.block')).toContainText('08.25–09.55'); // fredag KDS!L28
   await expect(page.locator('.toast')).toContainText('før 08.10–09.55');
   await expect(th.locator('dl > div', { hasText: 'Undervisning' })).toContainText('1 t 30 min');
-  await expect(th.locator('dl > div', { hasText: 'Lørdagstillæg' })).toHaveCount(0);
+  await expect(th.locator('dl > div', { hasText: /^Lørdage \(gns\.\)/ })).toHaveCount(0);
   await dragTo(page, blockEl(page, 'b1'), cell(page, 5, 0, 'room-2')); // fredag → lørdag ligger tæt: træk
   await expect(cell(page, 5, 0, 'room-2').locator('.block')).toContainText('08.25–09.55'); // lørdag KDS!D34
-  await expect(th.locator('dl > div', { hasText: 'Lørdagstillæg' })).toContainText('45 min');
+  await expect(th.locator('dl > div', { hasText: /^Lørdage \(gns\.\)/ })).toContainText('2 t 15 min'); // 90 min × 1,5
   await expect(teacherRow(page, 'TH').locator('.hours-total')).toHaveText('2 t 38 min');
   // 11) Fortryd gendanner placering, tid og optælling
   await page.keyboard.press('Control+z');
@@ -134,7 +135,7 @@ test('7) egne tider bevares ved flytning til anden sal, dag, dagdel og lørdag; 
     else await moveVia(page, b, cell(page, day, period, room));
     await expect(cell(page, day, period, room).locator('.block')).toContainText('09.10–09.55');
   }
-  await expect((await teacherDetail(page, 'TH')).locator('dl > div', { hasText: 'Lørdagstillæg' })).toContainText('23 min');
+  await expect((await teacherDetail(page, 'TH')).locator('dl > div', { hasText: /^Lørdage \(gns\.\)/ })).toContainText('1 t 8 min'); // 45 min × 1,5
   await waitSaved(page);
   await page.reload();
   await expect(cell(page, 5, 2, 'room-5').locator('.block')).toContainText('09.10–09.55');
@@ -156,7 +157,7 @@ test('8) fælles klasse med to hold og to lærere: én blok, begge lærere får 
   await expect(only(page)).toContainText('10.10–11.45'); // KDS!D35 fælles regel
   await expect(only(page)).toContainText('Hold 8 + 9');
   for (const t of ['FM', 'HC']) {
-    await expect((await teacherDetail(page, t)).locator('dl > div', { hasText: 'Undervisning' })).toContainText('1 t 35 min');
+    await expect((await teacherDetail(page, t)).locator('dl > div', { hasText: /^Lørdage \(gns\.\)/ })).toContainText('2 t 23 min'); // 95 min × 1,5 for begge
   }
 });
 
@@ -338,4 +339,31 @@ test('tæt besat uge fra dokumentet: indlæses fra Indstillinger, kan fortrydes'
   await expect(page.locator('.hours-alert')).toHaveCount(0);
   await page.keyboard.press('Control+z');
   await expect(page.locator('.board .block')).toHaveCount(0);
+});
+
+test('spørgsmål besvares med ét klik og bruges straks: K-salen som 9. kolonne og FM\'s timebank', async ({ page, request }) => {
+  await resetData(request, demoAppData()); // dokumentets uge med skolens regler 26/27
+  await loginAdmin(page);
+  await expect(page.locator('.room-head')).toHaveCount(8);
+  await expect(page.locator('.gear-dot')).toBeVisible();
+  await page.getByRole('button', { name: 'Indstillinger og øvrige funktioner' }).click();
+  const q = page.locator('.question', { hasText: 'K-salen' });
+  await q.getByRole('button', { name: 'Ja, tilføj K-salen' }).click();
+  await expect(q.getByRole('button', { name: 'Ja, tilføj K-salen' })).toHaveAttribute('aria-pressed', 'true');
+  // FM's opgørelse som i dokumentet
+  await page.getByRole('button', { name: /Arbejdstid, forberedelse og lørdagstillæg/ }).click();
+  await page.getByRole('tab', { name: 'Opgørelse pr. lærer' }).click();
+  await page.getByLabel('Lærer').selectOption({ label: 'FM' });
+  const calc = page.locator('.calc-table');
+  await expect(calc.locator('tr', { hasText: 'Undervisning ma–fre' })).toContainText('10 t 25 min');
+  await expect(calc.locator('tr', { hasText: 'Forberedelse ma–fre' })).toContainText('4 t 20 min');
+  await expect(calc.locator('tr', { hasText: 'Timebank pr. uge' })).toContainText('7 t 52 min');
+  await expect(calc.locator('tr', { hasText: 'Timebank pr. sæson' })).toContainText('322 t 32 min');
+  await page.getByRole('button', { name: 'Luk indstillinger' }).click();
+  await expect(page.locator('.room-head')).toHaveCount(9);
+  await expect(page.locator('.room-head', { hasText: 'K-salen' })).toBeVisible();
+  await expect(page.locator('[data-cell="cell|0|2|room-k"] .block')).toContainText('11.50–13.05'); // Hold 2, KDS!P6
+  await waitSaved(page);
+  await page.reload();
+  await expect(page.locator('.room-head')).toHaveCount(9);
 });

@@ -111,17 +111,30 @@ Antagelser er markeret **Antagelse**.
 - 8.4 Egen forberedelsesregel (samme som klasser / ingen / egen sats), der ikke ændrer klassernes.
 - 8.5 Fredagens øvrige tider følger fredagsreglerne uanset bemanding.
 
-## 9. Beregning (uændrede principper)
+## 9. Beregning – som skolens timeopgørelse (tilføjet 4. nov. 2026)
+
+Reference: `Fernando_Mora_timer_26_27.docx` (FM, sæson 26/27).
 
 ```
-U = faktisk undervisningstid      L = U × s/100 om lørdagen, ellers 0
-F = U × p/100 (standard)  eller  F = (U + L) × p/100
-K = U + F + L      Planlagt år = K(uge) × W      Rest = A − planlagt
+Undervisning ma–fre U        klassernes faktiske tid + evt. morgensamling
+Forberedelse ma–fre          U × 25 min pr. undervisningstime
+Lørdag pr. lørdag            lørdagstid × 1,25            (lørdagstillæg 25 %)
+Forberedelse pr. lørdag      lørdag inkl. tillæg × 25 min pr. time
+Lørdage pr. uge (gns.)       pr. lørdag × 18 lørdage ÷ 41 undervisningsuger
+I alt pr. uge K              U + forberedelse + lørdage (gns.) + forberedelse lørdage (gns.)
+Til rådighed pr. uge         kontrakt (fx 26 t) − 1 t orientering og mails
+Timebank                     til rådighed − K pr. uge;  × 41 uger pr. sæson
 ```
 
-- 9.1 Bruger den aktuelle tid efter regelopslag. Fuld præcision; afrunding kun i visning.
-- 9.2 Manglende satser/årsdata vises som manglende og regnes aldrig som 0; 0 er en gyldig værdi.
-- 9.3 Dagsdetaljer, formler, årsfremskrivning og timebank ligger bag tandhjulet.
+- 9.1 Bruger den aktuelle tid efter regelopslag. Afrunding som dokumentet: hele minutter i hvert
+  trin (kan skiftes til præcis beregning). FM giver præcis dokumentets tal: 10 t 25, 4 t 20,
+  3 t 51, 69 t 18, 1 t 41, 28 t 48, 42 min, 7 t 52 og 322 t 32.
+- 9.2 Kontrakttimer, orientering og antal lørdage pr. lærer (tomt = skolens fælles værdi).
+  Klasser kan markeres "uden forberedelse". Manglende oplysninger vises som manglende; 0 er gyldigt.
+- 9.3 Aflyst undervisning, der lægges i timebanken senere, møder og forestillinger er ikke indregnet.
+- 9.4 Opstillingen pr. lærer, satser, kontrakt og timebank ligger bag tandhjulet.
+- 9.5 Åbne spørgsmål til skolen besvares med ét klik under tandhjulet → Spørgsmål; svaret bruges
+  straks og kan fortrydes. En lille prik på tandhjulet viser åbne punkter.
 
 ## 10. Indstillinger (bag tandhjulet, ét afsnit åbent ad gangen)
 

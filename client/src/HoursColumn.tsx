@@ -17,7 +17,7 @@ interface Props {
 
 export function HoursColumn({ data, summaries, openId, onOpen, conflictCount, onShowConflicts, onDetails }: Props) {
   const teachers = data.teachers
-    .filter((t) => !t.archived || (summaries.get(t.id)?.week.U ?? 0) > 0)
+    .filter((t) => !t.archived || (summaries.get(t.id)?.teachingMinutes ?? 0) > 0)
     .sort((a, b) => a.initials.localeCompare(b.initials, 'da'));
   const ratesMissing = data.settings.prepPercent === null || data.settings.saturdayPercent === null;
   return (
@@ -45,21 +45,33 @@ export function HoursColumn({ data, summaries, openId, onOpen, conflictCount, on
                   <dl>
                     <div>
                       <dt>Undervisning</dt>
-                      <dd className="tabular">{formatDuration(s.week.U)}</dd>
+                      <dd className="tabular">{formatDuration(s.week.weekdayU)}</dd>
                     </div>
                     <div>
                       <dt>Forberedelse</dt>
-                      <dd className="tabular">{s.week.F === null ? 'sats mangler' : formatDuration(s.week.F)}</dd>
+                      <dd className="tabular">{s.week.weekdayF === null ? 'sats mangler' : formatDuration(s.week.weekdayF)}</dd>
                     </div>
-                    {(s.week.L === null || s.week.L > 0) && (
-                      <div>
-                        <dt>Lørdagstillæg</dt>
-                        <dd className="tabular">{s.week.L === null ? 'sats mangler' : formatDuration(s.week.L)}</dd>
-                      </div>
+                    {s.saturday.U > 0 && (
+                      <>
+                        <div>
+                          <dt>Lørdage (gns.)</dt>
+                          <dd className="tabular">{s.week.saturday === null ? 'mangler' : formatDuration(s.week.saturday)}</dd>
+                        </div>
+                        <div>
+                          <dt>Forb. lørdage (gns.)</dt>
+                          <dd className="tabular">{s.week.saturdayF === null ? 'mangler' : formatDuration(s.week.saturdayF)}</dd>
+                        </div>
+                      </>
                     )}
                     <div className="sum">
-                      <dt>I alt</dt>
+                      <dt>I alt pr. uge</dt>
                       <dd className="tabular">{formatDuration(s.week.K)}</dd>
+                    </div>
+                    <div>
+                      <dt>Timebank pr. uge</dt>
+                      <dd className={`tabular${s.timebank.week !== null && s.timebank.week < 0 ? ' neg' : ''}`}>
+                        {s.timebank.week === null ? (s.contract.hours === null ? 'kontrakt mangler' : 'mangler') : formatDuration(s.timebank.week)}
+                      </dd>
                     </div>
                   </dl>
                   {s.assembly && <p className="hint">Inkl. morgensamling fredag.</p>}

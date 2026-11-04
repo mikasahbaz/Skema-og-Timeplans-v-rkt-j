@@ -91,10 +91,14 @@ Hovedskærmen har kun skemaet, timeoptællingen, **Tilføj ny klasse** og tandhj
 4. **Retter du tidspunktet** på en klasse, bliver den en "anden slags" blok med egne tider
    (låsesymbol), som bevarer præcis sit klokkeslæt, uanset hvor den flyttes. Den kan sættes tilbage
    til automatisk tid i redigeringen.
-5. **Timer pr. uge** til højre: tryk på en lærer for undervisning, forberedelse og lørdagstillæg.
-6. **Tandhjulet** samler alt andet: lærere og hold, tidsregler og morgensamling, satser og
+5. **Timer pr. uge** til højre: tryk på en lærer for undervisning, forberedelse, lørdage og
+   timebank. Beregningen følger skolens timeopgørelse (25 min forberedelse pr. time, lørdage
+   × 1,25 fordelt på 18 lørdage og 41 uger, kontrakt minus 1 t orientering = timebank).
+6. **Spørgsmål**: en prik på tandhjulet betyder, at der er spørgsmål eller manglende oplysninger
+   (fx kontrakttimer). Tryk på et svar – det bruges straks og kan fortrydes.
+7. **Tandhjulet** samler alt andet: lærere og hold, tidsregler og morgensamling, satser og
    årsarbejdstid med detaljeret opgørelse, fortryd/gentag, konflikter, backup og læsevisning.
-7. **Fortryd**: Ctrl/⌘+Z, Gentag: Ctrl/⌘+Shift+Z – eller "Fortryd" i beskeden efter en ændring.
+8. **Fortryd**: Ctrl/⌘+Z, Gentag: Ctrl/⌘+Shift+Z – eller "Fortryd" i beskeden efter en ændring.
 
 ### Tidstabellen fra skemadokumentet
 

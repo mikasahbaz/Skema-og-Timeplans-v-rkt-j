@@ -82,6 +82,9 @@ export function addTeacher(data: AppData, initials: string): { data: AppData; te
     name: '',
     color: nextTeacherColor(data.teachers.filter((t) => !t.archived).map((t) => t.color)),
     annualHours: null,
+    contractHours: null,
+    orientationHours: null,
+    saturdays: null,
     archived: false,
   };
   return { data: { ...data, teachers: [...data.teachers, teacher] }, teacher };
